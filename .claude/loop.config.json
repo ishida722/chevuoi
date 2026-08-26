@@ -1,0 +1,35 @@
+{
+  "myProjects": ["chevuoi", "vuoi"],
+  "projectDelimiter": " ",
+  "claimStrategy": "branch",
+  "trello": {
+    "mode": "script",
+    "boardId": "5c18424575a4011876d0181f",
+    "standbyListId": "6a693033af5c2e2a961047e2",
+    "doingListId": "69a9f3809dea56cd2b7cc3ec",
+    "reviewListId": "6a602f246b142adf085ebcef",
+    "backlogListId": "69a68cf4640beb9c0d906f38"
+  },
+  "pocSignal": { "type": "titleMarker", "value": "[PoC]" },
+  "researchSignal": { "type": "titleMarker", "value": "[調査]" },
+  "pr": {
+    "draft": false,
+    "baseBranch": "main"
+  },
+  "repos": {
+    "chevuoi": {
+      "defaultBranch": "main",
+      "testCommands": [
+        "uv run sphinx-build -W -b html docs docs/_build/html"
+      ],
+      "experimentDir": "experiments"
+    },
+    "vuoi": {
+      "defaultBranch": "main",
+      "testCommands": [
+        "uv run sphinx-build -W -b html docs docs/_build/html"
+      ],
+      "experimentDir": "experiments"
+    }
+  }
+}
