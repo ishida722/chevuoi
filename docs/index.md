@@ -9,6 +9,7 @@
 :caption: 機能仕様
 
 spec/overview
+spec/mvp
 spec/workflow
 spec/task-sources
 spec/triage
