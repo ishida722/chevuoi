@@ -171,7 +171,8 @@ class WorktreeManager(ABC):
         """
 
     @abstractmethod
-    def list_finished(self, older_than_days: int) -> list[Worktree]: ...
+    def list_stale(self, older_than_days: int) -> list[Worktree]:
+        """指定日数を経過した worktree を列挙する（経過日数ベース。終端判定はしない）。"""
 
     @abstractmethod
     def remove(self, worktree: Worktree) -> None: ...
@@ -251,7 +252,7 @@ def execute(self, card: Card) -> None:
 
 ### GcUsecase（`vuoi gc`）
 
-`WorktreeManager.list_finished()` で終端済みかつ指定日数を経過した worktree を列挙し、`remove()` で削除するだけの薄いユースケースです。
+`WorktreeManager.list_stale()` で指定日数を経過した worktree を列挙し、`remove()` で削除するだけの薄いユースケースです。MVP は実行状態を永続化しないため「終端済みか」の判定は行わず、経過日数だけを基準にします。
 
 ## インフラ層
 
