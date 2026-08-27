@@ -37,14 +37,14 @@ class TestGitWorktreeManager:
     def test_create_makes_worktree_with_derived_branch(self, tmp_path, repo):
         manager = make_manager(tmp_path)
         project = Project(tag=ProjectTag(value="X"), repo_path=repo)
-        worktree = manager.create(project, FakeCard("X: test"))
+        worktree = manager.create(project, FakeCard("X test"))
         assert worktree.path.exists()
         assert worktree.branch.value == "chevuoi/fake-x1"
 
     def test_create_is_idempotent(self, tmp_path, repo):
         manager = make_manager(tmp_path)
         project = Project(tag=ProjectTag(value="X"), repo_path=repo)
-        card = FakeCard("X: test")
+        card = FakeCard("X test")
         first = manager.create(project, card)
         second = manager.create(project, card)
         assert first == second
@@ -52,14 +52,14 @@ class TestGitWorktreeManager:
     def test_remove_deletes_worktree(self, tmp_path, repo):
         manager = make_manager(tmp_path)
         project = Project(tag=ProjectTag(value="X"), repo_path=repo)
-        worktree = manager.create(project, FakeCard("X: test"))
+        worktree = manager.create(project, FakeCard("X test"))
         manager.remove(worktree)
         assert not worktree.path.exists()
 
     def test_recreate_after_remove_reuses_existing_branch(self, tmp_path, repo):
         manager = make_manager(tmp_path)
         project = Project(tag=ProjectTag(value="X"), repo_path=repo)
-        card = FakeCard("X: test")
+        card = FakeCard("X test")
         first = manager.create(project, card)
         manager.remove(first)
         second = manager.create(project, card)
@@ -83,7 +83,7 @@ class TestGitWorktreeManager:
 
         manager = make_manager(tmp_path)
         project = Project(tag=ProjectTag(value="X"), repo_path=repo)
-        worktree = manager.create(project, FakeCard("X: test"))
+        worktree = manager.create(project, FakeCard("X test"))
         assert manager.list_stale(older_than_days=1) == []
         old = time.time() - 2 * 86400
         os.utime(worktree.path, (old, old))

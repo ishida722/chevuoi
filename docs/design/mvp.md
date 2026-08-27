@@ -110,7 +110,7 @@ class Card(ABC):
     # --- 純粋ロジック（外部依存なし・基底クラスで実装） ---
     @property
     def project_tag(self) -> ProjectTag | None:
-        """タイトル先頭のタグ（例: "MIRAI: ログイン修正" → MIRAI）。無ければ None。"""
+        """タイトル先頭のタグ（例: "MIRAI ログイン修正" → MIRAI）。無ければ None。"""
 ```
 
 将来 GitHub Issues を扱う場合は `GithubIssueCard` を追加するだけで、アプリケーション層は変更不要です。Trello のカードと GitHub の Issue を混在させたキューも、複数の `CardProvider` の結果を連結すれば同じ `list[Card]` として扱えます（実装は v1.0.0 以降）。
@@ -122,6 +122,14 @@ class Project(BaseModel):
     """タグに紐付くプロジェクトフォルダ。"""
     tag: ProjectTag
     repo_path: Path            # 対応表から引いたリポジトリのパス
+
+    @property
+    def is_null(self) -> bool:
+        return False
+
+
+class NullProject(Project):
+    """解決できなかったことを表す Null Object。処理側は is_null で判定する。"""
 
 
 class Worktree(BaseModel):
@@ -179,10 +187,14 @@ class WorktreeManager(ABC):
 
 
 class NodeRunner(ABC):
-    """処理ノードの実行。実装はインフラ層（claude -p の subprocess 呼び出し）。"""
+    """処理ノードの実行。実装はインフラ層（claude -p の subprocess 呼び出し）。
+
+    プロンプトは呼び出し側（ユースケース・オーケストレーター）が決めて注入する。
+    ランナーはそれを実行するだけで、内容には関与しない。
+    """
 
     @abstractmethod
-    def run(self, worktree: Worktree, card: Card) -> NodeResult: ...
+    def run(self, worktree: Worktree, prompt: str) -> NodeResult: ...
 ```
 
 git worktree の操作もカード永続化ではなく外部境界（ファイルシステム・git）への作用なので、リポジトリではなくポートとして扱います。
@@ -228,20 +240,21 @@ def execute(self, card: Card) -> None:
         logger.info("claim failed, skip: %s", card.id)
         return
 
-    project = self.resolve_project(card)      # タグ → 対応表。決定的
-    if project is None:
+    project = self.resolve_project(card)      # タグ → 対応表。決定的。解決不能なら NullProject
+    if project.is_null:
         logger.warning("project not found, skip: %s", card.name)
-        return                                # カードは In Progress に残る
+        return
 
     worktree = self.worktrees.create(project, card)
-    result = self.runner.run(worktree, card)
+    result = self.runner.run(worktree, self.build_prompt(card))  # プロンプトはユースケースが決める
 
     if result.status is NodeStatus.DONE:
         card.add_comment(result.output)
-        card.move_to_review()
     else:
         card.add_comment(f"エラー: {result.output}")
-        # 仕様どおりカードは移動せず In Progress に残す
+    # エラーでも動作が終わったらレビューを要求する（In Progress に残すと
+    # エラーなのか作業中なのか分からないため）
+    card.move_to_review()
 ```
 
 設計上のポイント:
@@ -269,7 +282,7 @@ GitWorktreeManager
 : `git worktree add` / `list` / `remove` を `subprocess` で実行します。ブランチ名 `chevuoi/trello-<shortLink>` が既に存在する場合は既存の worktree を返し、再実行に耐えます。作成先は設定の worktree ルート配下です。
 
 ClaudeNodeRunner
-: worktree を作業ディレクトリとして `claude -p <プロンプト>` を1回実行します。プロンプトはカードのタイトル・本文・URL を埋め込むテンプレートで、計画・実装・テスト・PR 作成はすべてノード内（プロンプト）に委ねます。終了コードで `done` / `failed` を判定し、標準出力を `NodeResult.output` に入れます。タイムアウトを設定から与え、超過時は `failed` とします。
+: worktree を作業ディレクトリとして `claude -p <プロンプト>` を1回実行する汎用ランナーです。プロンプトは外部（ユースケース）から注入されたものをそのまま渡し、内容には関与しません。MVP では `ProcessCardUsecase` がカードのタイトル・本文・URL と作業手順（自己レビュー・テストゲート・PR 作成で停止）を埋め込んだプロンプトを組み立てます。計画・実装・テスト・PR 作成はすべてノード内（プロンプト）に委ねます。終了コードで `done` / `failed` を判定し、標準出力を `NodeResult.output` に入れます。タイムアウトを設定から与え、超過時は `failed` とします。
 
 ### 設定（infrastructure/config/settings.py）
 

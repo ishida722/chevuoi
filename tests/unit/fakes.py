@@ -69,10 +69,13 @@ class FakeWorktreeManager(WorktreeManager):
 
 
 class FakeNodeRunner(NodeRunner):
-    def __init__(self, result: NodeResult) -> None:
+    def __init__(self, result: NodeResult, *, exc: Exception | None = None) -> None:
         self.result = result
-        self.calls: list[tuple[Worktree, Card]] = []
+        self.exc = exc
+        self.calls: list[tuple[Worktree, str]] = []
 
-    def run(self, worktree: Worktree, card: Card) -> NodeResult:
-        self.calls.append((worktree, card))
+    def run(self, worktree: Worktree, prompt: str) -> NodeResult:
+        if self.exc is not None:
+            raise self.exc
+        self.calls.append((worktree, prompt))
         return self.result

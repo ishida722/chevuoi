@@ -37,7 +37,7 @@ class ExplodingProcessCard:
 
 class TestRunUsecase:
     def test_exception_is_contained_per_card(self):
-        cards = [FakeCard("A: 1"), FakeCard("A: 2")]
+        cards = [FakeCard("A 1"), FakeCard("A 2")]
         process = ExplodingProcessCard()
         RunUsecase(FakeProvider(cards), process).execute()  # type: ignore[arg-type]
         assert process.processed == [cards[1]]

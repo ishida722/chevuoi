@@ -5,16 +5,18 @@ from chevuoi.domain.value_objects.project_tag import ProjectTag
 
 class TestProjectTag:
     def test_extracts_tag_from_title(self):
-        assert ProjectTag.from_title("MIRAI: ログイン修正") == ProjectTag(value="MIRAI")
+        assert ProjectTag.from_title("MIRAI ログイン修正") == ProjectTag(value="MIRAI")
+
+    def test_extracts_japanese_tag(self):
+        assert ProjectTag.from_title("未来リサーチ テストを実施する") == ProjectTag(
+            value="未来リサーチ"
+        )
 
     def test_no_delimiter_returns_none(self):
         assert ProjectTag.from_title("ログイン修正") is None
 
     def test_empty_tag_returns_none(self):
-        assert ProjectTag.from_title(": ログイン修正") is None
-
-    def test_tag_with_space_returns_none(self):
-        assert ProjectTag.from_title("MIRAI 修正: x") is None
+        assert ProjectTag.from_title(" ログイン修正") is None
 
 
 class TestBranchName:

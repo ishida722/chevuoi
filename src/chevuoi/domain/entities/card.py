@@ -45,5 +45,5 @@ class Card(ABC):
 
     @property
     def project_tag(self) -> ProjectTag | None:
-        """タイトル先頭のタグ（例: "MIRAI: ログイン修正" → MIRAI）。無ければ None。"""
+        """タイトル先頭のタグ（例: "MIRAI ログイン修正" → MIRAI）。無ければ None。"""
         return ProjectTag.from_title(self.name)

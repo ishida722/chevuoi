@@ -22,7 +22,7 @@ def make_config() -> AppConfig:
 CARD_JSON = {
     "id": "abc123",
     "shortLink": "oFm0QQAr",
-    "name": "MIRAI: 修正",
+    "name": "MIRAI 修正",
     "desc": "本文",
     "url": "https://trello.com/c/oFm0QQAr",
     "idList": "ready",
@@ -66,7 +66,7 @@ class TestTrelloCardProvider:
         assert len(cards) == 1
         card = cards[0]
         assert str(card.id) == "trello:oFm0QQAr"
-        assert card.name == "MIRAI: 修正"
+        assert card.name == "MIRAI 修正"
         assert card.project_tag and card.project_tag.value == "MIRAI"
 
 

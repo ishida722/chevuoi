@@ -2,7 +2,6 @@ from pathlib import Path
 
 from chevuoi.infrastructure.claude.claude_node_runner import ClaudeNodeRunner
 from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
-from tests.unit.fakes import FakeCard
 
 
 def make_runner() -> ClaudeNodeRunner:
@@ -17,10 +16,6 @@ def make_runner() -> ClaudeNodeRunner:
 
 
 class TestClaudeNodeRunner:
-    def test_build_command_embeds_card_fields(self):
-        command = make_runner().build_command(FakeCard("MIRAI: 修正"))
-        assert command[:2] == ["claude", "-p"]
-        prompt = command[2]
-        assert "MIRAI: 修正" in prompt
-        assert "https://example.com/card" in prompt
-        assert "desc" in prompt
+    def test_build_command_passes_prompt_verbatim(self):
+        command = make_runner().build_command("チケットに対応してください")
+        assert command == ["claude", "-p", "チケットに対応してください"]

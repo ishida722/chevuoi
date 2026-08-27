@@ -20,9 +20,9 @@ def make_config(projects: dict[str, Path] | None = None) -> AppConfig:
     )
 
 
-def make_usecase(runner_result: NodeResult, projects=None):
+def make_usecase(runner_result: NodeResult, projects=None, runner_exc=None):
     worktrees = FakeWorktreeManager()
-    runner = FakeNodeRunner(runner_result)
+    runner = FakeNodeRunner(runner_result, exc=runner_exc)
     usecase = ProcessCardUsecase(worktrees, runner, make_config(projects))
     return usecase, worktrees, runner
 
@@ -32,25 +32,46 @@ class TestProcessCardUsecase:
         usecase, worktrees, runner = make_usecase(
             NodeResult(status=NodeStatus.DONE, output="PR: https://x/pr/1")
         )
-        card = FakeCard("MIRAI: ログイン修正")
+        card = FakeCard("MIRAI ログイン修正")
         usecase.execute(card)
         assert card.comments == ["PR: https://x/pr/1"]
         assert card.moved_to_review
         assert len(worktrees.created) == 1
         assert len(runner.calls) == 1
 
-    def test_failed_comments_error_and_stays(self):
+    def test_prompt_embeds_card_fields(self):
+        usecase, _, runner = make_usecase(
+            NodeResult(status=NodeStatus.DONE, output="x")
+        )
+        card = FakeCard("MIRAI ログイン修正")
+        usecase.execute(card)
+        prompt = runner.calls[0][1]
+        assert "MIRAI ログイン修正" in prompt
+        assert "https://example.com/card" in prompt
+        assert "desc" in prompt
+
+    def test_failed_comments_error_and_moves_to_review(self):
         usecase, _, _ = make_usecase(NodeResult(status=NodeStatus.FAILED, output="boom"))
-        card = FakeCard("MIRAI: ログイン修正")
+        card = FakeCard("MIRAI ログイン修正")
         usecase.execute(card)
         assert card.comments == ["エラー: boom"]
-        assert not card.moved_to_review
+        assert card.moved_to_review
+
+    def test_exception_comments_error_and_moves_to_review(self):
+        usecase, _, _ = make_usecase(
+            NodeResult(status=NodeStatus.DONE, output="x"),
+            runner_exc=RuntimeError("worktree broken"),
+        )
+        card = FakeCard("MIRAI ログイン修正")
+        usecase.execute(card)
+        assert card.comments == ["エラー: worktree broken"]
+        assert card.moved_to_review
 
     def test_claim_failure_skips_everything(self):
         usecase, worktrees, runner = make_usecase(
             NodeResult(status=NodeStatus.DONE, output="x")
         )
-        card = FakeCard("MIRAI: 修正", claimable=False)
+        card = FakeCard("MIRAI 修正", claimable=False)
         usecase.execute(card)
         assert not worktrees.created and not runner.calls and not card.comments
 
@@ -58,7 +79,7 @@ class TestProcessCardUsecase:
         usecase, worktrees, runner = make_usecase(
             NodeResult(status=NodeStatus.DONE, output="x"), projects={}
         )
-        card = FakeCard("MIRAI: 修正")
+        card = FakeCard("MIRAI 修正")
         usecase.execute(card)
         assert not worktrees.created and not runner.calls
         assert not card.moved_to_review
