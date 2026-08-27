@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from chevuoi.domain.entities.card import Card
+from chevuoi.domain.entities.node_result import NodeResult
+from chevuoi.domain.entities.project import Project
+from chevuoi.domain.entities.worktree import Worktree
+from chevuoi.domain.ports.node_runner import NodeRunner
+from chevuoi.domain.ports.worktree_manager import WorktreeManager
+from chevuoi.domain.value_objects.branch_name import BranchName
+from chevuoi.domain.value_objects.card_id import CardId
+
+
+class FakeCard(Card):
+    """操作を記録するだけのインメモリ Card 実装。"""
+
+    def __init__(self, name: str, *, claimable: bool = True) -> None:
+        self._name = name
+        self._claimable = claimable
+        self.comments: list[str] = []
+        self.moved_to_review = False
+
+    @property
+    def id(self) -> CardId:
+        return CardId(source="fake", external_id="x1")
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def desc(self) -> str:
+        return "desc"
+
+    @property
+    def url(self) -> str:
+        return "https://example.com/card"
+
+    def claim(self) -> bool:
+        return self._claimable
+
+    def add_comment(self, text: str) -> None:
+        self.comments.append(text)
+
+    def move_to_review(self) -> None:
+        self.moved_to_review = True
+
+
+class FakeWorktreeManager(WorktreeManager):
+    def __init__(self) -> None:
+        self.created: list[tuple[Project, Card]] = []
+        self.removed: list[Worktree] = []
+        self.finished: list[Worktree] = []
+
+    def create(self, project: Project, card: Card) -> Worktree:
+        self.created.append((project, card))
+        return Worktree(
+            path=Path("/tmp/wt"),
+            branch=BranchName.from_card_id(card.id),
+            repo_path=project.repo_path,
+        )
+
+    def list_stale(self, older_than_days: int) -> list[Worktree]:
+        return self.finished
+
+    def remove(self, worktree: Worktree) -> None:
+        self.removed.append(worktree)
+
+
+class FakeNodeRunner(NodeRunner):
+    def __init__(self, result: NodeResult, *, exc: Exception | None = None) -> None:
+        self.result = result
+        self.exc = exc
+        self.calls: list[tuple[Worktree, str]] = []
+
+    def run(self, worktree: Worktree, prompt: str) -> NodeResult:
+        if self.exc is not None:
+            raise self.exc
+        self.calls.append((worktree, prompt))
+        return self.result
