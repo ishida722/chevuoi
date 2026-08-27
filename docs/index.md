@@ -26,4 +26,5 @@ spec/cli
 :caption: 設計
 
 design/mvp
+design/route-config
 ```
