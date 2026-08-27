@@ -73,9 +73,13 @@ class ProcessCardUsecase:
             logger.warning("project not found, skip: %s", card.name)
             return
 
+        logger.info("project 解決: %s -> %s", project.tag.value, project.repo_path)
         try:
             worktree = self.worktrees.create(project, card)
+            logger.info("worktree 作成: %s", worktree.path)
+            logger.info("ノード実行開始: %s", card.name)
             result = self.runner.run(worktree, self.build_prompt(card))
+            logger.info("ノード実行終了: %s (status=%s)", card.name, result.status.name)
         except Exception as e:
             # エラーでも動作が終わったらレビューを要求する。
             # In Progress に残すとエラーなのか作業中なのか分からないため
@@ -89,6 +93,7 @@ class ProcessCardUsecase:
         else:
             card.add_comment(_truncate_comment(f"エラー: {result.output}"))
         card.move_to_review()
+        logger.info("In review へ移動: %s", card.name)
 
     def build_prompt(self, card: Card) -> str:
         return PROMPT_TEMPLATE.format(name=card.name, url=card.url, desc=card.desc)

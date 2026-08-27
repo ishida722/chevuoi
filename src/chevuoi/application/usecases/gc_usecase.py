@@ -17,7 +17,12 @@ class GcUsecase:
         self.worktrees = worktrees
 
     def execute(self, older_than_days: int) -> None:
-        for worktree in self.worktrees.list_stale(older_than_days):
+        stale = list(self.worktrees.list_stale(older_than_days))
+        if not stale:
+            logger.info("掃除対象の worktree はありません")
+            return
+        logger.info("worktree %d 件を掃除します", len(stale))
+        for worktree in stale:
             logger.info("removing worktree: %s", worktree.path)
             try:
                 self.worktrees.remove(worktree)

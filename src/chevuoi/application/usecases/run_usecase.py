@@ -19,8 +19,15 @@ class RunUsecase:
         self.process_card = process_card
 
     def execute(self) -> None:
-        for card in self.provider.fetch_ready_cards():
+        cards = self.provider.fetch_ready_cards()
+        if not cards:
+            logger.info("ready なカードはありません")
+            return
+        logger.info("ready なカード %d 枚を処理します", len(cards))
+        for card in cards:
+            logger.info("処理開始: %s (%s)", card.name, card.id)
             try:
                 self.process_card.execute(card)
             except Exception:
                 logger.exception("card processing failed: %s", card.id)
+        logger.info("1巡終了")
