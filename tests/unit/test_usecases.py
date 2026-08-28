@@ -135,6 +135,11 @@ class TestProcessCardUsecase:
         usecase.execute(FakeCard("タグなし"))
         assert worktrees.created == []
 
+    def test_tag_lookup_ignores_case(self):
+        usecase, _, _, _ = make_usecase(projects={"wf": Path("/repo/wf")})
+        project = usecase.resolve_project(FakeCard("Wf [dev]ドキュメント作成"))
+        assert project.repo_path == Path("/repo/wf")
+
 
 class TestGcUsecase:
     def test_removes_all_finished(self):

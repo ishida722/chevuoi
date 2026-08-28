@@ -125,5 +125,12 @@ class ProcessCardUsecase:
             return NullProject()
         repo_path = self.config.projects.get(tag.value)
         if repo_path is None:
+            # タグの大文字小文字は無視する（例: "Wf" と "wf" を同一視）
+            wanted = tag.value.casefold()
+            repo_path = next(
+                (path for key, path in self.config.projects.items() if key.casefold() == wanted),
+                None,
+            )
+        if repo_path is None:
             return NullProject()
         return Project(tag=tag, repo_path=repo_path)
