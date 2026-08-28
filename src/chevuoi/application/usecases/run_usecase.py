@@ -46,3 +46,4 @@ class RunUsecase:
             self.process_card.execute(card)
         except Exception:
             logger.exception("card processing failed: %s", card.id)
+        logger.info("処理終了: %s (%s)", card.name, card.id)

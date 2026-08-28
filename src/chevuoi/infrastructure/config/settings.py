@@ -21,6 +21,7 @@ class AppConfig(BaseModel):
     worktree_root: Path
     node_timeout_sec: int = 3600
     max_parallel: int = 4
+    log_file: Path = Path.home() / ".local" / "state" / "vuoi" / "vuoi.log"
 
 
 def load_config(path: Path) -> AppConfig:
