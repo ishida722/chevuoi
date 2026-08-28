@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Mapping, TypedDict
+from typing import Annotated, Any, Mapping, Sequence, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
@@ -47,11 +47,13 @@ class Runner(ABC):
         *,
         cwd: Path | None = None,
         session_id: str | None = None,
+        allowed_tools: Sequence[str] | None = None,
     ) -> RunResult:
         """prompt を実行して結果を返す。
 
         cwd: 作業ディレクトリ（None ならホストのカレント）。
         session_id: 前回の RunResult.session_id を渡すと文脈を継続する。
+        allowed_tools: 許可するツール名（None なら Claude Code の既定）。
         """
 
 

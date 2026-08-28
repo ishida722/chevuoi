@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from injector import inject
@@ -26,10 +27,17 @@ class ClaudeCliRunner(Runner):
     def __init__(self, config: AppConfig) -> None:
         self._timeout = config.node_timeout_sec
 
-    def build_command(self, prompt: str, session_id: str | None) -> list[str]:
+    def build_command(
+        self,
+        prompt: str,
+        session_id: str | None,
+        allowed_tools: Sequence[str] | None = None,
+    ) -> list[str]:
         cmd = ["claude", "-p", prompt, "--output-format", "json"]
         if session_id is not None:
             cmd += ["--resume", session_id]
+        if allowed_tools is not None:
+            cmd += ["--allowedTools", ",".join(allowed_tools)]
         return cmd
 
     def run(
@@ -38,10 +46,11 @@ class ClaudeCliRunner(Runner):
         *,
         cwd: Path | None = None,
         session_id: str | None = None,
+        allowed_tools: Sequence[str] | None = None,
     ) -> RunResult:
         try:
             proc = subprocess.run(
-                self.build_command(prompt, session_id),
+                self.build_command(prompt, session_id, allowed_tools),
                 cwd=cwd,
                 capture_output=True,
                 text=True,

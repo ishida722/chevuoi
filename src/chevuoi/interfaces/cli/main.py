@@ -10,10 +10,12 @@ from injector import Injector
 from chevuoi.application.usecases.gc_usecase import GcUsecase
 from chevuoi.application.usecases.run_usecase import RunUsecase
 from chevuoi.application.usecases.run_workflow_usecase import RunWorkflowUsecase
+from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
 from chevuoi.application.usecases.workflow_report_usecase import WorkflowReportUsecase
 from chevuoi.domain.exceptions import WorkflowError
 from chevuoi.infrastructure.config.settings import load_config
 from chevuoi.interface.di_modules import AppModule
+from chevuoi.interfaces.cli.adhoc_card import AdhocCard
 
 DEFAULT_CONFIG = Path.home() / ".config" / "vuoi" / "config.toml"
 
@@ -47,6 +49,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     workflow_run.add_argument(
         "message", nargs="?", default="", help="初期メッセージ（省略可）"
     )
+    workflow_select = workflow_sub.add_parser(
+        "select", help="カードのタイトル・本文からワークフローを選ぶ（ルーターの動作確認）"
+    )
+    workflow_select.add_argument("title", help="カードのタイトル")
+    workflow_select.add_argument("desc", nargs="?", default="", help="カードの本文（省略可）")
     return parser.parse_args(argv)
 
 
@@ -83,6 +90,15 @@ def main(argv: list[str] | None = None) -> int:
                             k: v for k, v in result.state.items() if k != "messages"
                         }
                         print(extra if extra else "(出力なし)")
+                case "select":
+                    meta, decision = injector.get(SelectWorkflowUsecase).execute(
+                        AdhocCard(args.title, args.desc)
+                    )
+                    chosen = meta.name if meta else "（棄権 → needs_human）"
+                    print(f"選択: {chosen}")
+                    print(f"確信度: {decision.confidence}")
+                    print(f"理由: {decision.reason}")
+                    return 0 if meta else 2
     return 0
 
 

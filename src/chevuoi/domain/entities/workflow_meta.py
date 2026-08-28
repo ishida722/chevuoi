@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,6 +39,8 @@ class WorkflowMeta(BaseModel):
     tags: list[Tag] = []
     intents: list[Intent] = []
     priority: int = 50
+    # 終端処理の宣言。pr: 差分があれば PR を作る / comment: 結果をカードにコメントするだけ
+    outcome: Literal["pr", "comment"] = "pr"
     capabilities: Capabilities = Capabilities()
     settings: dict[str, Any] = {}
     entry: str = "workflow.py"

@@ -309,6 +309,10 @@ binder.bind(WorkflowRegistry, scope=singleton)   # キャッシュを持つた�
 
 本機構は現時点では**カード処理（`ProcessCardUsecase`）と接続しません**。`vuoi workflow list` / `vuoi workflow run`（`RunWorkflowUsecase` + `GraphExecutor`）と `Registry` API の提供までが範囲です。将来、triage・ノード実行をユーザー定義ワークフローへ委ねる場合は、`ProcessCardUsecase` が `resolve_one` / `by_intent` で `WorkflowMeta` を引き、`Registry.get()` のグラフを `GraphExecutor` ポートで実行する形になります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
 
+## ルーター（カード → ワークフロー）
+
+`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
+
 ## テスト戦略
 
 - **ドメイン層（単体・外部依存なし）**: `WorkflowMeta` の検証ルール全件（未知フィールド・`api_version` 不一致・空 `summary`・正規表現違反・`capabilities` 未知キー）。`workflow_selection` の決定性 — 同一入力に対する順序安定性、intent 衝突時の全員 invalid 化、`resolve_one` の `WorkflowNotFound` / `AmbiguousSelection`、priority tie-break。

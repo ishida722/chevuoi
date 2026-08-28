@@ -106,6 +106,7 @@ max_results = 10
 | `tags` | list[str] | | `[]` | 分類ラベル。`^[a-z0-9][a-z0-9_-]*$`。多対多 |
 | `intents` | list[str] | | `[]` | 直接指名キー。`^[a-z0-9][a-z0-9_.-]*$`。**全体で一意** |
 | `priority` | int | | `50` | 同点時の tie-break。大きいほど優先 |
+| `outcome` | str | | `"pr"` | 終端処理の宣言。`pr`: 差分があれば PR を作る / `comment`: 結果をカードにコメントするだけ |
 | `capabilities` | table | | `{}` | 実行特性。呼び出し側の事前判断に使う |
 | `settings` | table | | `{}` | 任意の設定値。`ctx.settings` にマージされる |
 | `entry` | str | | `"workflow.py"` | エントリファイル名 |
@@ -165,7 +166,8 @@ class Runner(ABC):
     """Claude Code を非対話で 1 回実行するポート。実装はホスト側"""
     @abstractmethod
     def run(self, prompt: str, *, cwd: Path | None = None,
-            session_id: str | None = None) -> RunResult: ...
+            session_id: str | None = None,
+            allowed_tools: Sequence[str] | None = None) -> RunResult: ...
 
 
 @dataclass(frozen=True)
@@ -330,6 +332,27 @@ reg.get(name: str)               -> CompiledStateGraph    # 遅延ロード + �
 ### LLM ルーティングとの接続
 
 `summary` / `when_to_use` をそのままプロンプトに渡し、**LLM には名前だけを出力させて `reg.get(name)` で引きます**。これで非決定性が「どれを選ぶか」の一点に封じ込められます。
+
+カードからの選択は 3 層で行います（{doc}`triage` と同じ構造）:
+
+1. **決定的**: タイトルに `[<intent>]` マーカーがあれば `by_intent`（LLM 不使用）
+2. **LLM 分類**: 有効なワークフロー全件の `name` / `summary` / `when_to_use` とカードのタイトル・本文を渡し、名前 1 つ・確信度（high / low）・理由を JSON で返させる。読み取り系ツールのみ許可
+3. **棄権**: 返った名前が候補に無い、解析不能、確信度が high でない → 選択なし（`needs_human`）。必ずどれかを選ばされるルーターは必ず間違えるため、棄権パスは外さない
+
+ワークフローを増やしてもルーター側の変更は不要で、精度は各ワークフローの `when_to_use`（特に「〜なら X を使う」という除外条件）で上げます。`vuoi workflow select <title> [desc]` で判断を手元で確認できます。
+
+### ワークフローが返すもの・ホストが行う終端処理
+
+ワークフローは **成否（`blocked` 理由の有無）と人間向け要約** を返すだけで、コミット・PR 作成・カード移動は行いません。ホストは `outcome` × 差分の有無 × `blocked` の有無で決定的に終端処理を決めます:
+
+| `outcome` | 実行後 | ホストの処理 |
+|---|---|---|
+| `pr` | 差分あり・blocked なし | コミット・push・PR 作成 → URL をコメント → In review |
+| `pr` | 差分なし・blocked なし | PR は作らず、要約を `🤖 変更なし:` コメント → In review（`no_change`） |
+| `comment` | blocked なし | 要約を `🤖 完了:` コメント → In review |
+| いずれも | blocked あり | `🤖 blocked: <理由>` コメント、差分は worktree に残す（`failed_gate` / `needs_human`） |
+
+「PR を作るべきタスクだったが結果的に変更が不要だった」は差分の有無という事実で決まり、LLM の申告には依らない。
 
 ## 8. 有効化・無効化
 
