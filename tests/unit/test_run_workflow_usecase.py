@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from vuoi_sdk import END, START, BaseState, StateGraph
@@ -80,3 +82,22 @@ class TestRunWorkflowUsecase:
     def test_unknown_name_raises(self):
         with pytest.raises(WorkflowNotFound):
             make_usecase().execute("nope", "x")
+
+
+class TestWorkdirBinding:
+    def test_ctx_workdir_is_bound_per_execution(self, tmp_path):
+        from vuoi_sdk import WorkflowContext
+        from tests.integration.test_workflow_infra import FakeRunner
+
+        ctx = WorkflowContext(llm=None, settings={}, logger=None, runner=FakeRunner())
+        seen = []
+        g = StateGraph(BaseState)
+        g.add_node("peek", lambda s: seen.append(ctx.workdir) or {})
+        g.add_edge(START, "peek")
+        g.add_edge("peek", END)
+        wf = LoadedWorkflow(name="peek", graph=g.compile(name="peek"))
+
+        LangGraphExecutor().execute(wf, "", workdir=tmp_path)
+        assert seen == [tmp_path]
+        # 束縛の外では実行ディレクトリに戻る
+        assert ctx.workdir == Path.cwd()

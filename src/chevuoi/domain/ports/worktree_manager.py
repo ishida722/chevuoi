@@ -23,3 +23,8 @@ class WorktreeManager(ABC):
 
     @abstractmethod
     def remove(self, worktree: Worktree) -> None: ...
+
+    @abstractmethod
+    def has_changes(self, worktree: Worktree) -> bool:
+        """未コミットの変更（追跡外ファイル含む）があるか。決定的な事実で、
+        ワークフローの自己申告には依らない。"""

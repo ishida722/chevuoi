@@ -307,7 +307,18 @@ binder.bind(WorkflowRegistry, scope=singleton)   # キャッシュを持つた�
 
 ### カード処理パイプラインとの関係
 
-本機構は現時点では**カード処理（`ProcessCardUsecase`）と接続しません**。`vuoi workflow list` / `vuoi workflow run`（`RunWorkflowUsecase` + `GraphExecutor`）と `Registry` API の提供までが範囲です。将来、triage・ノード実行をユーザー定義ワークフローへ委ねる場合は、`ProcessCardUsecase` が `resolve_one` / `by_intent` で `WorkflowMeta` を引き、`Registry.get()` のグラフを `GraphExecutor` ポートで実行する形になります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
+## カード処理との接続（ProcessCardUsecase）
+
+`vuoi run` のカード処理はユーザー定義ワークフローで行います（ホスト内蔵の一本プロンプト経路は廃止。ワークフローが選べない場合は別経路にフォールバックせず `needs_human`）。
+
+```
+claim → project 解決（決定的） → SelectWorkflowUsecase
+   棄権 → 🤖 needs_human コメント → In review
+   選択 → worktree 作成 → Registry.get(name) → GraphExecutor.execute(workdir=worktree.path)
+        → 終端処理（決定的: outcome × has_changes × blocked）→ コメント → In review
+```
+
+終端処理は `ProcessCardUsecase.finalize` に集約し、PR 作成は `PullRequestPublisher` ポート（`GhPullRequestPublisher`: `git add/commit/push` + `gh pr create`、既存 PR があれば再利用）で行います。差分の有無は `WorktreeManager.has_changes`（`git status --porcelain`）で判定します。作業ディレクトリは `GraphExecutor` が SDK の `bind_workdir` で実行ごとに束縛し、ワークフローは `ctx.workdir` で受け取ります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
 
 ## ルーター（カード → ワークフロー）
 

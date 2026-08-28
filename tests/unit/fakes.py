@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from chevuoi.domain.entities.card import Card
-from chevuoi.domain.entities.node_result import NodeResult
 from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.worktree import Worktree
-from chevuoi.domain.ports.node_runner import NodeRunner
+from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
+from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
+from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.domain.value_objects.branch_name import BranchName
 from chevuoi.domain.value_objects.card_id import CardId
@@ -53,6 +54,7 @@ class FakeWorktreeManager(WorktreeManager):
         self.created: list[tuple[Project, Card]] = []
         self.removed: list[Worktree] = []
         self.finished: list[Worktree] = []
+        self.changes = True
 
     def create(self, project: Project, card: Card) -> Worktree:
         self.created.append((project, card))
@@ -68,15 +70,28 @@ class FakeWorktreeManager(WorktreeManager):
     def remove(self, worktree: Worktree) -> None:
         self.removed.append(worktree)
 
+    def has_changes(self, worktree: Worktree) -> bool:
+        return self.changes
 
-class FakeNodeRunner(NodeRunner):
-    def __init__(self, result: NodeResult, *, exc: Exception | None = None) -> None:
+
+class FakeExecutor(GraphExecutor):
+    def __init__(self, result: ExecutionResult, *, exc: Exception | None = None) -> None:
         self.result = result
         self.exc = exc
-        self.calls: list[tuple[Worktree, str]] = []
+        self.calls: list[dict] = []
 
-    def run(self, worktree: Worktree, prompt: str) -> NodeResult:
+    def execute(self, workflow: LoadedWorkflow, message: str, *, workdir=None) -> ExecutionResult:
         if self.exc is not None:
             raise self.exc
-        self.calls.append((worktree, prompt))
+        self.calls.append({"workflow": workflow, "message": message, "workdir": workdir})
         return self.result
+
+
+class FakePublisher(PullRequestPublisher):
+    def __init__(self, url: str = "https://x/pr/1") -> None:
+        self.url = url
+        self.calls: list[dict] = []
+
+    def publish(self, worktree: Worktree, *, title: str, body: str) -> str:
+        self.calls.append({"worktree": worktree, "title": title, "body": body})
+        return self.url

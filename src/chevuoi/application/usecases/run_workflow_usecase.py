@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from injector import inject
 
@@ -21,10 +22,12 @@ class RunWorkflowUsecase:
         self._registry = registry
         self._executor = executor
 
-    def execute(self, name: str, message: str) -> ExecutionResult:
+    def execute(
+        self, name: str, message: str, *, workdir: Path | None = None
+    ) -> ExecutionResult:
         self._registry.scan()
         workflow = self._registry.get(name)
         logger.info("ワークフロー実行開始: %s", name)
-        result = self._executor.execute(workflow, message)
+        result = self._executor.execute(workflow, message, workdir=workdir or Path.cwd())
         logger.info("ワークフロー実行終了: %s", name)
         return result

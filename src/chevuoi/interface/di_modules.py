@@ -11,10 +11,10 @@ from chevuoi.domain.ports.llm_factory import LlmFactory
 from chevuoi.domain.ports.workflow_loader import WorkflowLoader
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
-from chevuoi.domain.ports.node_runner import NodeRunner
+from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
-from chevuoi.infrastructure.claude.claude_node_runner import ClaudeNodeRunner
 from chevuoi.infrastructure.config.settings import AppConfig
+from chevuoi.infrastructure.git.gh_pull_request_publisher import GhPullRequestPublisher
 from chevuoi.infrastructure.git.git_worktree_manager import GitWorktreeManager
 from chevuoi.infrastructure.trello.client import TrelloClient
 from chevuoi.infrastructure.trello.trello_card_provider import TrelloCardProvider
@@ -35,7 +35,7 @@ class AppModule(Module):
         binder.bind(TrelloClient, scope=singleton)
         binder.bind(CardProvider, to=TrelloCardProvider, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorktreeManager, to=GitWorktreeManager, scope=singleton)  # type: ignore[type-abstract]
-        binder.bind(NodeRunner, to=ClaudeNodeRunner, scope=singleton)  # type: ignore[type-abstract]
+        binder.bind(PullRequestPublisher, to=GhPullRequestPublisher, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowScanner, to=FsWorkflowScanner, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowLoader, to=PythonWorkflowLoader, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(LlmFactory, to=LangchainLlmFactory, scope=singleton)  # type: ignore[type-abstract]

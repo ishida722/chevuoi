@@ -178,15 +178,20 @@ class WorkflowContext:
     logger: Any
     runner: Runner
 
+    @property
+    def workdir(self) -> Path: ...   # この実行の作業ディレクトリ（ホストが束縛）
+
 
 __all__ = ["API_VERSION", "BaseState", "RunResult", "Runner",
-           "WorkflowContext", "StateGraph", "START", "END"]
+           "WorkflowContext", "bind_workdir", "StateGraph", "START", "END"]
 ```
 
 `WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
 
 - **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う
 - **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
+- **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
+- **推奨 state キー**: ホストの終端処理は最終 state の `blocked`（空でなければ撤退理由）と `result`（人間向け要約。PR 本文・カードコメントに使われる）を読む
 - `tools` は将来拡張
 
 ## 5. ユーザーが書くコード
@@ -231,7 +236,9 @@ def build(ctx: WorkflowContext) -> StateGraph:
     g = StateGraph(State)
 
     def implement(state: State):
-        r = ctx.runner.run("テストを通す実装をして", session_id=state.get("session_id"))
+        r = ctx.runner.run(
+            "テストを通す実装をして", cwd=ctx.workdir, session_id=state.get("session_id")
+        )
         if not r.ok:
             ctx.logger.error("実行失敗: %s", r.output)
         return {"session_id": r.session_id}

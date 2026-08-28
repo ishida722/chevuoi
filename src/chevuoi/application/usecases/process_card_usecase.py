@@ -4,10 +4,13 @@ import logging
 
 from injector import inject
 
+from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
+from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
 from chevuoi.domain.entities.card import Card
-from chevuoi.domain.entities.node_result import NodeStatus
 from chevuoi.domain.entities.project import NullProject, Project
-from chevuoi.domain.ports.node_runner import NodeRunner
+from chevuoi.domain.entities.worktree import Worktree
+from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
+from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.infrastructure.config.settings import AppConfig
 
@@ -15,32 +18,6 @@ logger = logging.getLogger(__name__)
 
 # Trello のコメント上限（16384 文字）に収める。PR URL は末尾に出るので末尾を優先して残す
 MAX_COMMENT_LEN = 16000
-
-# ノードに渡す作業指示。ランナーは汎用の claude 実行機であり、
-# 「何をさせるか」はこのユースケースが決める（MVP では作業ルートはこれ1本）。
-# 内容は cycle スキルのコア部分（カードの取得・移動などの Trello 操作を除く、
-# 作業〜自己レビュー〜テスト〜PR 作成のループ）に合わせている。
-PROMPT_TEMPLATE = """\
-次のチケットに対応してください。
-
-タイトル: {name}
-URL: {url}
-
-本文:
-{desc}
-
-進め方:
-1. チケットの内容から作業モードを判断する（実装 / PoC / 調査・報告書作成）。迷ったら実装。
-2. このリポジトリの規約（CLAUDE.md・テスト・lint）に従って作業する。
-3. チケットのスコープを超える変更や、依頼にない大規模リファクタリングはしない。
-4. コミット前に差分を自己レビューし、見つけた問題は自分で修正する。
-5. テストを実行し、すべて通った状態でのみ commit / push する。
-6. ブランチを push して PR を作成する。PR の作成までで必ず停止し、マージはしない。
-   既定ブランチ（main）への直接 commit / push、履歴改変（force push・reset --hard）は禁止。
-
-同じ原因で2回連続失敗して解決の目処が立たない場合は、無理に続けず原因と状況を報告して終了してください。
-最後に PR の URL（PR を作らない作業の場合は成果の要約）を出力してください。
-"""
 
 
 def _truncate_comment(text: str) -> str:
@@ -50,17 +27,28 @@ def _truncate_comment(text: str) -> str:
 
 
 class ProcessCardUsecase:
-    """カード1枚の処理。フローは後ろ向きの遷移を持たない一直線。"""
+    """カード 1 枚の処理。
+
+    claim → project 解決 → ワークフロー選択 → worktree 上で実行 → 終端処理 → In review。
+    終端処理は outcome × 差分の有無 × blocked の有無で決定的に決める（LLM の自己申告は使わない）。
+    ワークフローが選べない（棄権）場合は needs_human として人間に返し、別経路にはフォールバックしない。
+    """
 
     @inject
     def __init__(
         self,
         worktrees: WorktreeManager,
-        runner: NodeRunner,
+        selector: SelectWorkflowUsecase,
+        registry: WorkflowRegistry,
+        executor: GraphExecutor,
+        publisher: PullRequestPublisher,
         config: AppConfig,
     ) -> None:
         self.worktrees = worktrees
-        self.runner = runner
+        self.selector = selector
+        self.registry = registry
+        self.executor = executor
+        self.publisher = publisher
         self.config = config
 
     def execute(self, card: Card) -> None:
@@ -72,31 +60,60 @@ class ProcessCardUsecase:
         if project.is_null:
             logger.warning("project not found, skip: %s", card.name)
             return
-
         logger.info("project 解決: %s -> %s", project.tag.value, project.repo_path)
+
         try:
+            meta, decision = self.selector.execute(card, cwd=project.repo_path)
+            if meta is None:
+                card.add_comment(
+                    _truncate_comment(
+                        "🤖 needs_human: 適用するワークフローを決められませんでした。"
+                        f"カードの本文に作業の種類（実装 / 調査 / 運用作業）を書き足してください。\n"
+                        f"理由: {decision.reason}"
+                    )
+                )
+                card.move_to_review()
+                return
+
             worktree = self.worktrees.create(project, card)
             logger.info("worktree 作成: %s", worktree.path)
-            logger.info("ノード実行開始: %s", card.name)
-            result = self.runner.run(worktree, self.build_prompt(card))
-            logger.info("ノード実行終了: %s (status=%s)", card.name, result.status.name)
+            workflow = self.registry.get(meta.name)
+            logger.info("ワークフロー実行開始: %s (%s)", card.name, meta.name)
+            result = self.executor.execute(
+                workflow, self.build_message(card), workdir=worktree.path
+            )
+            logger.info("ワークフロー実行終了: %s (blocked=%s)", card.name, bool(result.blocked))
+            comment = self.finalize(card, meta.outcome, worktree, result)
         except Exception as e:
             # エラーでも動作が終わったらレビューを要求する。
             # In Progress に残すとエラーなのか作業中なのか分からないため
-            logger.exception("node execution failed: %s", card.id)
-            card.add_comment(_truncate_comment(f"エラー: {e}"))
-            card.move_to_review()
-            return
+            logger.exception("card processing failed: %s", card.id)
+            comment = f"🤖 エラー: {e}"
 
-        if result.status is NodeStatus.DONE:
-            card.add_comment(_truncate_comment(result.output))
-        else:
-            card.add_comment(_truncate_comment(f"エラー: {result.output}"))
+        card.add_comment(_truncate_comment(comment))
         card.move_to_review()
         logger.info("In review へ移動: %s", card.name)
 
-    def build_prompt(self, card: Card) -> str:
-        return PROMPT_TEMPLATE.format(name=card.name, url=card.url, desc=card.desc)
+    def finalize(
+        self, card: Card, outcome: str, worktree: Worktree, result: ExecutionResult
+    ) -> str:
+        """終端処理。戻り値はカードに残すコメント。"""
+        if result.blocked:
+            return f"🤖 blocked: {result.blocked}\n\nworktree: {worktree.path}"
+        if outcome == "comment":
+            return f"🤖 完了:\n{result.summary}"
+        if not self.worktrees.has_changes(worktree):
+            return f"🤖 変更なし:\n{result.summary}"
+        url = self.publisher.publish(
+            worktree,
+            title=card.name,
+            body=f"{result.summary}\n\nTrello: {card.url}",
+        )
+        return f"{result.summary}\n\n🤖 PR: {url}"
+
+    @staticmethod
+    def build_message(card: Card) -> str:
+        return f"タイトル: {card.name}\nURL: {card.url}\n\n本文:\n{card.desc}"
 
     def resolve_project(self, card: Card) -> Project:
         """タイトルのタグを対応表で引く。決定的で、LLM には推測させない。

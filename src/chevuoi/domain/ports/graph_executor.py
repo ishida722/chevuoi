@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -9,10 +10,16 @@ from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 
 
 class ExecutionResult(BaseModel):
-    """グラフ実行の結果。最終 state はワークフロー固有なので素通しする。"""
+    """グラフ実行の結果。最終 state はワークフロー固有なので素通しする。
 
-    output: str  # 最後のメッセージ本文（無ければ空文字）
+    blocked / summary はワークフロー契約の推奨キー（state["blocked"] / state["result"]）。
+    ホストの終端処理はこの 2 つと差分の有無だけを見る。
+    """
+
+    output: str  # グラフが追加した最後のメッセージ本文（無ければ空文字）
     state: dict[str, Any]
+    blocked: str = ""
+    summary: str = ""
 
 
 class GraphExecutor(ABC):
@@ -21,4 +28,6 @@ class GraphExecutor(ABC):
     """
 
     @abstractmethod
-    def execute(self, workflow: LoadedWorkflow, message: str) -> ExecutionResult: ...
+    def execute(
+        self, workflow: LoadedWorkflow, message: str, *, workdir: Path | None = None
+    ) -> ExecutionResult: ...

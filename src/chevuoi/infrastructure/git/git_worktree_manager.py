@@ -82,6 +82,12 @@ class GitWorktreeManager(WorktreeManager):
         if result.returncode != 0:
             raise WorktreeError(result.stderr.strip())
 
+    def has_changes(self, worktree: Worktree) -> bool:
+        result = self._git(worktree.path, "status", "--porcelain", check=False)
+        if result.returncode != 0:
+            raise WorktreeError(result.stderr.strip())
+        return result.stdout.strip() != ""
+
     def _resolve_repo(self, worktree_path: Path) -> Path | None:
         result = self._git(worktree_path, "rev-parse", "--path-format=absolute",
                            "--git-common-dir", check=False)
