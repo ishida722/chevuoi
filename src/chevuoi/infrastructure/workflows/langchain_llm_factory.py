@@ -12,8 +12,8 @@ from chevuoi.infrastructure.config.settings import AppConfig
 class LangchainLlmFactory(LlmFactory):
     """AppConfig.llm のモデル名から BaseChatModel を構築する。
 
-    llm 未設定でもスキャン・一覧は動き、ロード時にのみエラーになる
-    （二段階ロードの利点を設定面でも保つ）。
+    llm 未設定なら None を返す（ctx.llm = None）。runner だけで完結する
+    ワークフローは [llm] なしでロード・実行できる。
     """
 
     @inject
@@ -22,9 +22,7 @@ class LangchainLlmFactory(LlmFactory):
 
     def create(self) -> Any:
         if self._config.llm is None:
-            raise WorkflowError(
-                "設定に [llm] がありません。ワークフローのロードには llm.model が必要です"
-            )
+            return None
         try:
             from langchain.chat_models import init_chat_model
         except ImportError as exc:

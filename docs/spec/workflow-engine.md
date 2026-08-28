@@ -153,18 +153,39 @@ class BaseState(TypedDict):
 
 
 @dataclass(frozen=True)
+class RunResult:
+    """Runner による Claude Code 1 回の実行結果。失敗も例外ではなくこの型で返る"""
+    ok: bool
+    output: str
+    session_id: str | None = None
+    cost_usd: float | None = None
+
+
+class Runner(ABC):
+    """Claude Code を非対話で 1 回実行するポート。実装はホスト側"""
+    @abstractmethod
+    def run(self, prompt: str, *, cwd: Path | None = None,
+            session_id: str | None = None) -> RunResult: ...
+
+
+@dataclass(frozen=True)
 class WorkflowContext:
     """依存性注入。ユーザーは自前で LLM や接続を作らない"""
-    llm: BaseChatModel
+    llm: BaseChatModel | None
     settings: Mapping[str, Any]
     logger: Any
+    runner: Runner
 
 
-__all__ = ["API_VERSION", "BaseState", "WorkflowContext",
-           "StateGraph", "START", "END"]
+__all__ = ["API_VERSION", "BaseState", "RunResult", "Runner",
+           "WorkflowContext", "StateGraph", "START", "END"]
 ```
 
-`WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。MVP では `llm` / `settings` / `logger` の 3 つに絞ります（`tools` は将来拡張）。
+`WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
+
+- **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う
+- **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
+- `tools` は将来拡張
 
 ## 5. ユーザーが書くコード
 
@@ -195,6 +216,28 @@ def build(ctx: WorkflowContext) -> StateGraph:
     g.add_edge(START, "chat")
     g.add_edge("chat", END)
     return g          # compile はホストが行う
+```
+
+### runner を使う例（Claude Code をノードにする）
+
+```python
+class State(BaseState):
+    session_id: str | None
+
+
+def build(ctx: WorkflowContext) -> StateGraph:
+    g = StateGraph(State)
+
+    def implement(state: State):
+        r = ctx.runner.run("テストを通す実装をして", session_id=state.get("session_id"))
+        if not r.ok:
+            ctx.logger.error("実行失敗: %s", r.output)
+        return {"session_id": r.session_id}
+
+    g.add_node("implement", implement)
+    g.add_edge(START, "implement")
+    g.add_edge("implement", END)
+    return g
 ```
 
 ### 状態の拡張と設定の利用

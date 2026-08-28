@@ -9,7 +9,7 @@ import types
 from injector import inject
 from langgraph.graph import StateGraph
 
-from vuoi_sdk import WorkflowContext
+from vuoi_sdk import Runner, WorkflowContext
 
 from chevuoi.domain.entities.workflow_meta import WorkflowMeta
 from chevuoi.domain.ports.llm_factory import LlmFactory
@@ -37,9 +37,12 @@ class PythonWorkflowLoader(WorkflowLoader):
     """
 
     @inject
-    def __init__(self, config: AppConfig, llm_factory: LlmFactory) -> None:
+    def __init__(
+        self, config: AppConfig, llm_factory: LlmFactory, runner: Runner
+    ) -> None:
         self._config = config
         self._llm_factory = llm_factory
+        self._runner = runner
 
     def load(self, meta: WorkflowMeta) -> LoadedWorkflow | LoadFailure:
         fq = f"{NAMESPACE}.{meta.name}"
@@ -90,4 +93,5 @@ class PythonWorkflowLoader(WorkflowLoader):
             llm=self._llm_factory.create(),
             settings={**self._config.workflow_defaults, **meta.settings},
             logger=logging.getLogger("vuoi.workflows").getChild(meta.name),
+            runner=self._runner,
         )

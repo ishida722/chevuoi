@@ -243,7 +243,7 @@ NAMESPACE = "vuoi_workflows"
 
 class PythonWorkflowLoader(WorkflowLoader):
     @inject
-    def __init__(self, config: AppConfig, llm_factory: LlmFactory): ...
+    def __init__(self, config: AppConfig, llm_factory: LlmFactory, runner: Runner): ...
 
     def load(self, meta: WorkflowMeta) -> LoadedWorkflow | LoadFailure:
         # 1. sys.path を退避
@@ -259,7 +259,10 @@ class PythonWorkflowLoader(WorkflowLoader):
 `ctx` の組み立てもここで行います。`WorkflowContext`（`vuoi_sdk`）の各フィールドは:
 
 llm
-: `LlmFactory` ポート（ドメイン層に新設する小さな ABC）経由で取得します。MVP の実装は `AppConfig.llm` の設定（モデル名・API キー環境変数名）から `BaseChatModel` を 1 つ構築する `LangchainLlmFactory` です。`BaseChatModel` 型はインフラ層と SDK にしか現れません。
+: `LlmFactory` ポート（ドメイン層に新設する小さな ABC）経由で取得します。MVP の実装は `AppConfig.llm` の設定（モデル名・API キー環境変数名）から `BaseChatModel` を 1 つ構築する `LangchainLlmFactory` です。`BaseChatModel` 型はインフラ層と SDK にしか現れません。`[llm]` 未設定なら `None` を注入します（runner だけで完結するワークフローは追加設定なしで動く）。
+
+runner
+: SDK の `Runner` ABC（`vuoi_sdk` が契約を持つ）。実装は `ClaudeCliRunner`（`claude -p --output-format json` の subprocess 実行、`--resume` によるセッション継続、`node_timeout_sec` の適用、コスト・セッション ID の構造化取得）。カード処理用の `NodeRunner` とは契約が異なる（Worktree 前提でなく、構造化結果を返す）ため別ポートとする。失敗は `RunResult(ok=False)` で返し、例外を投げない。
 
 settings
 : `{**config.workflow_defaults, **meta.settings}`。ホスト既定にワークフロー固有設定を上書きマージします。
@@ -283,7 +286,7 @@ class AppConfig(BaseModel):
     workflow_defaults: dict[str, Any] = {}
 ```
 
-`workflows_dir` の既定値解決（`XDG_CONFIG_HOME` → `~/.config/vuoi/workflows`）は設定ロード時に行い、以降のコードは常に絶対パスを受け取ります。`llm` が未設定の場合、スキャン・一覧・選択は動作し、`Registry.get()`（ロード）だけが設定エラーになります。二段階ロードの利点（コード実行なしで一覧できる）を設定面でも保つためです。
+`workflows_dir` の既定値解決（`XDG_CONFIG_HOME` → `~/.config/vuoi/workflows`）は設定ロード時に行い、以降のコードは常に絶対パスを受け取ります。`llm` が未設定の場合も全機能が動作し、ワークフローには `ctx.llm = None` が注入されます（`ctx.llm` を使うワークフローだけが実行時に None を踏む）。
 
 ## インターフェース層
 
