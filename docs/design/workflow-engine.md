@@ -170,7 +170,7 @@ class WorkflowLoader(ABC):
     def load(self, meta: WorkflowMeta) -> LoadedWorkflow | LoadFailure: ...
 ```
 
-`LoadedWorkflow.graph: Any` は方針 2 の帰結です。ドメインに `CompiledStateGraph` 型を持ち込まない代償として型検査が緩みますが、コアがグラフに対して行う操作は「実行器へ渡す」だけであり、属性アクセスをしないため実害はありません。将来グラフ実行（`invoke` / `stream`）をコアから扱う必要が出た時点で、`GraphExecutor` ポートを追加して操作を抽象化します（MVP のスコープ外）。
+`LoadedWorkflow.graph: Any` は方針 2 の帰結です。ドメインに `CompiledStateGraph` 型を持ち込まない代償として型検査が緩みますが、コアがグラフに対して行う操作は「実行器へ渡す」だけであり、属性アクセスをしないため実害はありません。グラフ実行（`invoke`）は `GraphExecutor` ポート（ドメイン）+ `LangGraphExecutor`（インフラ）で抽象化し、`CompiledStateGraph` の操作をインフラ層に閉じ込めています。
 
 `KeyboardInterrupt` だけは `load()` から再送出されます（Ctrl-C を殺さない。仕様 §6）。
 
@@ -307,7 +307,7 @@ binder.bind(WorkflowRegistry, scope=singleton)   # キャッシュを持つた�
 
 ### カード処理パイプラインとの関係
 
-本機構は MVP では**カード処理（`ProcessCardUsecase`）と接続しません**。`vuoi workflow list` と `Registry` API の提供までが本チケットの範囲です。将来、triage・ノード実行をユーザー定義ワークフローへ委ねる場合は、`ProcessCardUsecase` が `resolve_one` / `by_intent` で `WorkflowMeta` を引き、`Registry.get()` のグラフを新設の `GraphExecutor` ポートで実行する形になります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
+本機構は現時点では**カード処理（`ProcessCardUsecase`）と接続しません**。`vuoi workflow list` / `vuoi workflow run`（`RunWorkflowUsecase` + `GraphExecutor`）と `Registry` API の提供までが範囲です。将来、triage・ノード実行をユーザー定義ワークフローへ委ねる場合は、`ProcessCardUsecase` が `resolve_one` / `by_intent` で `WorkflowMeta` を引き、`Registry.get()` のグラフを `GraphExecutor` ポートで実行する形になります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
 
 ## テスト戦略
 

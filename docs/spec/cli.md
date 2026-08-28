@@ -8,7 +8,11 @@ vuoi run --source trello --limit 1
 vuoi resume <run_id>          # 中断ランの再開
 vuoi status                   # 未終端ランの一覧
 vuoi gc --older-than 7d       # 終端済み worktree の掃除
+vuoi workflow list            # ユーザー定義ワークフローの一覧（コード実行なし）
+vuoi workflow run <name> ["メッセージ"]   # ワークフローを名指しで1回実行
 ```
+
+`workflow run` は最後に追加されたメッセージ本文を標準出力に出します。メッセージを増やさないワークフローの場合は、`messages` を除いた最終 state を表示します。失敗（存在しない・無効・ロード失敗）は標準エラーに理由を出して終了コード 1 で終わります。
 
 ## 再開可能性
 
