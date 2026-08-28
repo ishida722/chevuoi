@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from injector import Injector
@@ -56,11 +57,36 @@ class ExplodingProcessCard:
         self.processed.append(card)
 
 
+class BlockingProcessCard:
+    """全カードが同時に走るまで待ち合わせる ProcessCardUsecase の代役。"""
+
+    def __init__(self, parties: int) -> None:
+        self.barrier = threading.Barrier(parties)
+        self.processed: list[Card] = []
+        self.lock = threading.Lock()
+
+    def execute(self, card: Card) -> None:
+        # 直列実行だと2枚目が来ずタイムアウトするため、並列であることの検証になる
+        self.barrier.wait(timeout=5)
+        with self.lock:
+            self.processed.append(card)
+
+
+def make_config(max_parallel: int = 4) -> AppConfig:
+    return AppConfig(
+        trello=TrelloConfig(api_key="k", api_token="t", ready_list_id="r",
+                            in_progress_list_id="d", in_review_list_id="v"),
+        projects={},
+        worktree_root=Path("/tmp/wt"),
+        max_parallel=max_parallel,
+    )
+
+
 class TestRunUsecase:
     def test_exception_is_contained_per_card(self):
         cards = [FakeCard("A 1"), FakeCard("A 2")]
         process = ExplodingProcessCard()
-        RunUsecase(FakeProvider(cards), process).execute()  # type: ignore[arg-type]
+        RunUsecase(FakeProvider(cards), process, make_config(max_parallel=1)).execute()  # type: ignore[arg-type]
         assert process.processed == [cards[1]]
 
     def test_repeats_until_no_ready_cards(self):
@@ -68,7 +94,7 @@ class TestRunUsecase:
         second = [FakeCard("A 3", external_id="c3")]
         provider = QueueProvider([first, second, []])
         process = RecordingProcessCard()
-        RunUsecase(provider, process).execute()  # type: ignore[arg-type]
+        RunUsecase(provider, process, make_config(max_parallel=1)).execute()  # type: ignore[arg-type]
         assert process.processed == first + second
         assert provider.fetch_count == 3
 
@@ -76,7 +102,7 @@ class TestRunUsecase:
         stuck = [FakeCard("A 1", external_id="c1")]
         provider = QueueProvider([stuck, stuck, stuck])
         process = RecordingProcessCard()
-        RunUsecase(provider, process).execute()  # type: ignore[arg-type]
+        RunUsecase(provider, process, make_config(max_parallel=1)).execute()  # type: ignore[arg-type]
         # 同じカード集合が続いたら打ち切る（2回目の巡回はしない）
         assert process.processed == stuck
         assert provider.fetch_count == 2
@@ -84,8 +110,14 @@ class TestRunUsecase:
     def test_no_ready_cards_at_start(self):
         provider = QueueProvider([[]])
         process = RecordingProcessCard()
-        RunUsecase(provider, process).execute()  # type: ignore[arg-type]
+        RunUsecase(provider, process, make_config(max_parallel=1)).execute()  # type: ignore[arg-type]
         assert process.processed == []
+
+    def test_cards_run_in_parallel(self):
+        cards = [FakeCard("A 1"), FakeCard("A 2")]
+        process = BlockingProcessCard(parties=2)
+        RunUsecase(FakeProvider(cards), process, make_config(max_parallel=2)).execute()  # type: ignore[arg-type]
+        assert sorted(c.name for c in process.processed) == ["A 1", "A 2"]
 
 
 class TestDiWiring:
