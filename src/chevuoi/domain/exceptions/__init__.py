@@ -12,3 +12,15 @@ class ProjectNotFoundError(ChevuoiError):
 
 class WorktreeError(ChevuoiError):
     """git worktree の操作に失敗した。"""
+
+
+class WorkflowError(ChevuoiError):
+    """ワークフローのロード・設定に失敗した。"""
+
+
+class WorkflowNotFound(WorkflowError):
+    """条件に合うワークフローが存在しない。"""
+
+
+class AmbiguousSelection(WorkflowError):
+    """候補が 1 件に定まらない。silent fallback はしない（仕様 §7）。"""

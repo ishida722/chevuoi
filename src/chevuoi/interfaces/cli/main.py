@@ -9,6 +9,7 @@ from injector import Injector
 
 from chevuoi.application.usecases.gc_usecase import GcUsecase
 from chevuoi.application.usecases.run_usecase import RunUsecase
+from chevuoi.application.usecases.workflow_report_usecase import WorkflowReportUsecase
 from chevuoi.infrastructure.config.settings import load_config
 from chevuoi.interface.di_modules import AppModule
 
@@ -36,6 +37,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub.add_parser("run", help="Trello をポーリングして1巡")
     gc = sub.add_parser("gc", help="終端済み worktree の掃除")
     gc.add_argument("--older-than", type=int, default=7, help="経過日数（既定: 7）")
+    workflow = sub.add_parser("workflow", help="ユーザー定義ワークフローの管理")
+    workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
+    workflow_sub.add_parser("list", help="ワークフローの一覧を表示")
     return parser.parse_args(argv)
 
 
@@ -52,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
             injector.get(RunUsecase).execute()
         case "gc":
             injector.get(GcUsecase).execute(older_than_days=args.older_than)
+        case "workflow":
+            print(injector.get(WorkflowReportUsecase).execute())
     return 0
 
 
