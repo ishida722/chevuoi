@@ -47,6 +47,12 @@ class TestClaudeWorkflowRouter:
         assert runner.calls[0]["allowed_tools"] == ("Read", "Grep", "Glob")
         assert "when_to_use: 調査・報告書" in runner.calls[0]["prompt"]
 
+    def test_prompt_excludes_feasibility_from_confidence(self):
+        # 資料の取得可否などの実行可能性を確信度に混ぜないルールが明記されている
+        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}')
+        prompt = runner.calls[0]["prompt"]
+        assert "取得可否" in prompt and "確信度に反映しない" in prompt
+
     def test_code_fence_tolerated(self):
         d, _ = self.route('```json\n{"workflow": "dev", "confidence": "high", "reason": "r"}\n```')
         assert d.workflow == "dev"
