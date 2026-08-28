@@ -322,7 +322,7 @@ claim → project 解決（決定的） → SelectWorkflowUsecase
 
 ## ルーター（カード → ワークフロー）
 
-`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
+`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
 
 ## テスト戦略
 
