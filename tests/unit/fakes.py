@@ -15,15 +15,16 @@ from chevuoi.domain.value_objects.card_id import CardId
 class FakeCard(Card):
     """操作を記録するだけのインメモリ Card 実装。"""
 
-    def __init__(self, name: str, *, claimable: bool = True) -> None:
+    def __init__(self, name: str, *, claimable: bool = True, external_id: str = "x1") -> None:
         self._name = name
         self._claimable = claimable
+        self._external_id = external_id
         self.comments: list[str] = []
         self.moved_to_review = False
 
     @property
     def id(self) -> CardId:
-        return CardId(source="fake", external_id="x1")
+        return CardId(source="fake", external_id=self._external_id)
 
     @property
     def name(self) -> str:
