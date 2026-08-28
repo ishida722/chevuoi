@@ -170,7 +170,7 @@ class WorkflowLoader(ABC):
     def load(self, meta: WorkflowMeta) -> LoadedWorkflow | LoadFailure: ...
 ```
 
-`LoadedWorkflow.graph: Any` は方針 2 の帰結です。ドメインに `CompiledStateGraph` 型を持ち込まない代償として型検査が緩みますが、コアがグラフに対して行う操作は「実行器へ渡す」だけであり、属性アクセスをしないため実害はありません。将来グラフ実行（`invoke` / `stream`）をコアから扱う必要が出た時点で、`GraphExecutor` ポートを追加して操作を抽象化します（MVP のスコープ外）。
+`LoadedWorkflow.graph: Any` は方針 2 の帰結です。ドメインに `CompiledStateGraph` 型を持ち込まない代償として型検査が緩みますが、コアがグラフに対して行う操作は「実行器へ渡す」だけであり、属性アクセスをしないため実害はありません。グラフ実行（`invoke`）は `GraphExecutor` ポート（ドメイン）+ `LangGraphExecutor`（インフラ）で抽象化し、`CompiledStateGraph` の操作をインフラ層に閉じ込めています。
 
 `KeyboardInterrupt` だけは `load()` から再送出されます（Ctrl-C を殺さない。仕様 §6）。
 
@@ -243,7 +243,7 @@ NAMESPACE = "vuoi_workflows"
 
 class PythonWorkflowLoader(WorkflowLoader):
     @inject
-    def __init__(self, config: AppConfig, llm_factory: LlmFactory): ...
+    def __init__(self, config: AppConfig, llm_factory: LlmFactory, runner: Runner): ...
 
     def load(self, meta: WorkflowMeta) -> LoadedWorkflow | LoadFailure:
         # 1. sys.path を退避
@@ -259,7 +259,10 @@ class PythonWorkflowLoader(WorkflowLoader):
 `ctx` の組み立てもここで行います。`WorkflowContext`（`vuoi_sdk`）の各フィールドは:
 
 llm
-: `LlmFactory` ポート（ドメイン層に新設する小さな ABC）経由で取得します。MVP の実装は `AppConfig.llm` の設定（モデル名・API キー環境変数名）から `BaseChatModel` を 1 つ構築する `LangchainLlmFactory` です。`BaseChatModel` 型はインフラ層と SDK にしか現れません。
+: `LlmFactory` ポート（ドメイン層に新設する小さな ABC）経由で取得します。MVP の実装は `AppConfig.llm` の設定（モデル名・API キー環境変数名）から `BaseChatModel` を 1 つ構築する `LangchainLlmFactory` です。`BaseChatModel` 型はインフラ層と SDK にしか現れません。`[llm]` 未設定なら `None` を注入します（runner だけで完結するワークフローは追加設定なしで動く）。
+
+runner
+: SDK の `Runner` ABC（`vuoi_sdk` が契約を持つ）。実装は `ClaudeCliRunner`（`claude -p --output-format json` の subprocess 実行、`--resume` によるセッション継続、`node_timeout_sec` の適用、コスト・セッション ID の構造化取得）。カード処理用の `NodeRunner` とは契約が異なる（Worktree 前提でなく、構造化結果を返す）ため別ポートとする。失敗は `RunResult(ok=False)` で返し、例外を投げない。
 
 settings
 : `{**config.workflow_defaults, **meta.settings}`。ホスト既定にワークフロー固有設定を上書きマージします。
@@ -283,7 +286,7 @@ class AppConfig(BaseModel):
     workflow_defaults: dict[str, Any] = {}
 ```
 
-`workflows_dir` の既定値解決（`XDG_CONFIG_HOME` → `~/.config/vuoi/workflows`）は設定ロード時に行い、以降のコードは常に絶対パスを受け取ります。`llm` が未設定の場合、スキャン・一覧・選択は動作し、`Registry.get()`（ロード）だけが設定エラーになります。二段階ロードの利点（コード実行なしで一覧できる）を設定面でも保つためです。
+`workflows_dir` の既定値解決（`XDG_CONFIG_HOME` → `~/.config/vuoi/workflows`）は設定ロード時に行い、以降のコードは常に絶対パスを受け取ります。`llm` が未設定の場合も全機能が動作し、ワークフローには `ctx.llm = None` が注入されます（`ctx.llm` を使うワークフローだけが実行時に None を踏む）。
 
 ## インターフェース層
 
@@ -304,7 +307,22 @@ binder.bind(WorkflowRegistry, scope=singleton)   # キャッシュを持つた�
 
 ### カード処理パイプラインとの関係
 
-本機構は MVP では**カード処理（`ProcessCardUsecase`）と接続しません**。`vuoi workflow list` と `Registry` API の提供までが本チケットの範囲です。将来、triage・ノード実行をユーザー定義ワークフローへ委ねる場合は、`ProcessCardUsecase` が `resolve_one` / `by_intent` で `WorkflowMeta` を引き、`Registry.get()` のグラフを新設の `GraphExecutor` ポートで実行する形になります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
+## カード処理との接続（ProcessCardUsecase）
+
+`vuoi run` のカード処理はユーザー定義ワークフローで行います（ホスト内蔵の一本プロンプト経路は廃止。ワークフローが選べない場合は別経路にフォールバックせず `needs_human`）。
+
+```
+claim → project 解決（決定的） → SelectWorkflowUsecase
+   棄権 → 🤖 needs_human コメント → In review
+   選択 → worktree 作成 → Registry.get(name) → GraphExecutor.execute(workdir=worktree.path)
+        → 終端処理（決定的: outcome × has_changes × blocked）→ コメント → In review
+```
+
+終端処理は `ProcessCardUsecase.finalize` に集約し、PR 作成は `PullRequestPublisher` ポート（`GhPullRequestPublisher`: `git add/commit/push` + `gh pr create`、既存 PR があれば再利用）で行います。差分の有無は `WorktreeManager.has_changes`（`git status --porcelain`）で判定します。作業ディレクトリは `GraphExecutor` が SDK の `bind_workdir` で実行ごとに束縛し、ワークフローは `ctx.workdir` で受け取ります。LLM ルーティング（仕様 §7）を導入する場合も、LLM の出力は名前だけに限定し `reg.get(name)` で引くことで、chevuoi 本体の不変条件 INV-1（遷移判断に LLM を使わない）と両立させます。
+
+## ルーター（カード → ワークフロー）
+
+`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
 
 ## テスト戦略
 

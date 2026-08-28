@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from vuoi_sdk import Runner, RunResult
+
 from chevuoi.domain.ports.llm_factory import LlmFactory
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow, LoadFailure
 from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
@@ -34,6 +36,11 @@ def build(ctx):
 class FakeLlmFactory(LlmFactory):
     def create(self):
         return object()
+
+
+class FakeRunner(Runner):
+    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None):
+        return RunResult(ok=True, output=f"fake: {prompt}")
 
 
 @pytest.fixture
@@ -130,7 +137,7 @@ class TestScanner:
 class TestLoader:
     def load(self, config, workflows_dir, name):
         meta = FsWorkflowScanner(config).scan().metas[name]
-        return PythonWorkflowLoader(config, FakeLlmFactory()).load(meta)
+        return PythonWorkflowLoader(config, FakeLlmFactory(), FakeRunner()).load(meta)
 
     def test_success_with_relative_import(self, workflows_dir, config):
         d = write_workflow(

@@ -106,6 +106,7 @@ max_results = 10
 | `tags` | list[str] | | `[]` | 分類ラベル。`^[a-z0-9][a-z0-9_-]*$`。多対多 |
 | `intents` | list[str] | | `[]` | 直接指名キー。`^[a-z0-9][a-z0-9_.-]*$`。**全体で一意** |
 | `priority` | int | | `50` | 同点時の tie-break。大きいほど優先 |
+| `outcome` | str | | `"pr"` | 終端処理の宣言。`pr`: 差分があれば PR を作る / `comment`: 結果をカードにコメントするだけ |
 | `capabilities` | table | | `{}` | 実行特性。呼び出し側の事前判断に使う |
 | `settings` | table | | `{}` | 任意の設定値。`ctx.settings` にマージされる |
 | `entry` | str | | `"workflow.py"` | エントリファイル名 |
@@ -153,18 +154,45 @@ class BaseState(TypedDict):
 
 
 @dataclass(frozen=True)
+class RunResult:
+    """Runner による Claude Code 1 回の実行結果。失敗も例外ではなくこの型で返る"""
+    ok: bool
+    output: str
+    session_id: str | None = None
+    cost_usd: float | None = None
+
+
+class Runner(ABC):
+    """Claude Code を非対話で 1 回実行するポート。実装はホスト側"""
+    @abstractmethod
+    def run(self, prompt: str, *, cwd: Path | None = None,
+            session_id: str | None = None,
+            allowed_tools: Sequence[str] | None = None) -> RunResult: ...
+
+
+@dataclass(frozen=True)
 class WorkflowContext:
     """依存性注入。ユーザーは自前で LLM や接続を作らない"""
-    llm: BaseChatModel
+    llm: BaseChatModel | None
     settings: Mapping[str, Any]
     logger: Any
+    runner: Runner
+
+    @property
+    def workdir(self) -> Path: ...   # この実行の作業ディレクトリ（ホストが束縛）
 
 
-__all__ = ["API_VERSION", "BaseState", "WorkflowContext",
-           "StateGraph", "START", "END"]
+__all__ = ["API_VERSION", "BaseState", "RunResult", "Runner",
+           "WorkflowContext", "bind_workdir", "StateGraph", "START", "END"]
 ```
 
-`WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。MVP では `llm` / `settings` / `logger` の 3 つに絞ります（`tools` は将来拡張）。
+`WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
+
+- **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う
+- **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
+- **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
+- **推奨 state キー**: ホストの終端処理は最終 state の `blocked`（空でなければ撤退理由）と `result`（人間向け要約。PR 本文・カードコメントに使われる）を読む
+- `tools` は将来拡張
 
 ## 5. ユーザーが書くコード
 
@@ -195,6 +223,30 @@ def build(ctx: WorkflowContext) -> StateGraph:
     g.add_edge(START, "chat")
     g.add_edge("chat", END)
     return g          # compile はホストが行う
+```
+
+### runner を使う例（Claude Code をノードにする）
+
+```python
+class State(BaseState):
+    session_id: str | None
+
+
+def build(ctx: WorkflowContext) -> StateGraph:
+    g = StateGraph(State)
+
+    def implement(state: State):
+        r = ctx.runner.run(
+            "テストを通す実装をして", cwd=ctx.workdir, session_id=state.get("session_id")
+        )
+        if not r.ok:
+            ctx.logger.error("実行失敗: %s", r.output)
+        return {"session_id": r.session_id}
+
+    g.add_node("implement", implement)
+    g.add_edge(START, "implement")
+    g.add_edge("implement", END)
+    return g
 ```
 
 ### 状態の拡張と設定の利用
@@ -287,6 +339,27 @@ reg.get(name: str)               -> CompiledStateGraph    # 遅延ロード + �
 ### LLM ルーティングとの接続
 
 `summary` / `when_to_use` をそのままプロンプトに渡し、**LLM には名前だけを出力させて `reg.get(name)` で引きます**。これで非決定性が「どれを選ぶか」の一点に封じ込められます。
+
+カードからの選択は 3 層で行います（{doc}`triage` と同じ構造）:
+
+1. **決定的**: タイトルに `[<intent>]` マーカーがあれば `by_intent`（LLM 不使用）
+2. **LLM 分類**: 有効なワークフロー全件の `name` / `summary` / `when_to_use` とカードのタイトル・本文を渡し、名前 1 つ・確信度（high / low）・理由を JSON で返させる。読み取り系ツールのみ許可
+3. **棄権**: 返った名前が候補に無い、解析不能、確信度が high でない → 選択なし（`needs_human`）。必ずどれかを選ばされるルーターは必ず間違えるため、棄権パスは外さない
+
+ワークフローを増やしてもルーター側の変更は不要で、精度は各ワークフローの `when_to_use`（特に「〜なら X を使う」という除外条件）で上げます。`vuoi workflow select <title> [desc]` で判断を手元で確認できます。
+
+### ワークフローが返すもの・ホストが行う終端処理
+
+ワークフローは **成否（`blocked` 理由の有無）と人間向け要約** を返すだけで、コミット・PR 作成・カード移動は行いません。ホストは `outcome` × 差分の有無 × `blocked` の有無で決定的に終端処理を決めます:
+
+| `outcome` | 実行後 | ホストの処理 |
+|---|---|---|
+| `pr` | 差分あり・blocked なし | コミット・push・PR 作成 → URL をコメント → In review |
+| `pr` | 差分なし・blocked なし | PR は作らず、要約を `🤖 変更なし:` コメント → In review（`no_change`） |
+| `comment` | blocked なし | 要約を `🤖 完了:` コメント → In review |
+| いずれも | blocked あり | `🤖 blocked: <理由>` コメント、差分は worktree に残す（`failed_gate` / `needs_human`） |
+
+「PR を作るべきタスクだったが結果的に変更が不要だった」は差分の有無という事実で決まり、LLM の申告には依らない。
 
 ## 8. 有効化・無効化
 
