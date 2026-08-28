@@ -15,6 +15,20 @@ from chevuoi.interface.di_modules import AppModule
 DEFAULT_CONFIG = Path.home() / ".config" / "vuoi" / "config.toml"
 
 
+def setup_file_logging(log_file: Path) -> None:
+    """時刻付きフォーマットでログをファイルにも残す。
+
+    カードごとの処理開始・終了時刻を後から追えるようにするため、
+    標準エラーとは別にファイルへ追記する。
+    """
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_file, encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    logging.getLogger().addHandler(handler)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="vuoi")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -31,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     args = parse_args(argv)
     config = load_config(args.config)
+    setup_file_logging(config.log_file)
     injector = Injector([AppModule(config)])
     match args.command:
         case "run":
