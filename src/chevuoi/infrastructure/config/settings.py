@@ -20,6 +20,7 @@ class AppConfig(BaseModel):
     projects: dict[str, Path]
     worktree_root: Path
     node_timeout_sec: int = 3600
+    max_parallel: int = 4
 
 
 def load_config(path: Path) -> AppConfig:
