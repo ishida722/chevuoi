@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from injector import Injector
@@ -35,12 +36,43 @@ class ExplodingProcessCard:
         self.processed.append(card)
 
 
+class BlockingProcessCard:
+    """全カードが同時に走るまで待ち合わせる ProcessCardUsecase の代役。"""
+
+    def __init__(self, parties: int) -> None:
+        self.barrier = threading.Barrier(parties)
+        self.processed: list[Card] = []
+        self.lock = threading.Lock()
+
+    def execute(self, card: Card) -> None:
+        # 直列実行だと2枚目が来ずタイムアウトするため、並列であることの検証になる
+        self.barrier.wait(timeout=5)
+        with self.lock:
+            self.processed.append(card)
+
+
+def make_config(max_parallel: int = 4) -> AppConfig:
+    return AppConfig(
+        trello=TrelloConfig(api_key="k", api_token="t", ready_list_id="r",
+                            in_progress_list_id="d", in_review_list_id="v"),
+        projects={},
+        worktree_root=Path("/tmp/wt"),
+        max_parallel=max_parallel,
+    )
+
+
 class TestRunUsecase:
     def test_exception_is_contained_per_card(self):
         cards = [FakeCard("A 1"), FakeCard("A 2")]
         process = ExplodingProcessCard()
-        RunUsecase(FakeProvider(cards), process).execute()  # type: ignore[arg-type]
+        RunUsecase(FakeProvider(cards), process, make_config(max_parallel=1)).execute()  # type: ignore[arg-type]
         assert process.processed == [cards[1]]
+
+    def test_cards_run_in_parallel(self):
+        cards = [FakeCard("A 1"), FakeCard("A 2")]
+        process = BlockingProcessCard(parties=2)
+        RunUsecase(FakeProvider(cards), process, make_config(max_parallel=2)).execute()  # type: ignore[arg-type]
+        assert sorted(c.name for c in process.processed) == ["A 1", "A 2"]
 
 
 class TestDiWiring:
