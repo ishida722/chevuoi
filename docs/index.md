@@ -19,6 +19,7 @@ spec/outcomes
 spec/proposals
 spec/worktree
 spec/cli
+spec/workflow-engine
 ```
 
 ```{toctree}
@@ -26,4 +27,5 @@ spec/cli
 :caption: 設計
 
 design/mvp
+design/workflow-engine
 ```
