@@ -28,4 +28,5 @@ spec/workflow-engine
 
 design/mvp
 design/workflow-engine
+design/20260829-card-issuing/design
 ```

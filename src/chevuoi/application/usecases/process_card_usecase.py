@@ -4,9 +4,11 @@ import logging
 
 from injector import inject
 
+from chevuoi.application.usecases.issue_proposals_usecase import IssueProposalsUsecase
 from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
 from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
 from chevuoi.domain.entities.card import Card
+from chevuoi.domain.entities.issue_report import IssueReport
 from chevuoi.domain.entities.project import NullProject, Project
 from chevuoi.domain.entities.worktree import Worktree
 from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
@@ -43,6 +45,7 @@ class ProcessCardUsecase:
         executor: GraphExecutor,
         publisher: PullRequestPublisher,
         config: AppConfig,
+        proposals: IssueProposalsUsecase,
     ) -> None:
         self.worktrees = worktrees
         self.selector = selector
@@ -50,6 +53,7 @@ class ProcessCardUsecase:
         self.executor = executor
         self.publisher = publisher
         self.config = config
+        self.proposals = proposals
 
     def execute(self, card: Card) -> None:
         if not card.claim():
@@ -62,6 +66,8 @@ class ProcessCardUsecase:
             return
         logger.info("project 解決: %s -> %s", project.tag.value, project.repo_path)
 
+        # 起票結果は finalize（PR 作成を含む）が失敗しても失わないよう try の外で持つ
+        report = IssueReport()
         try:
             meta, decision = self.selector.execute(card, cwd=project.repo_path)
             if meta is None:
@@ -83,6 +89,8 @@ class ProcessCardUsecase:
                 workflow, self.build_message(card), workdir=worktree.path, project=project
             )
             logger.info("ワークフロー実行終了: %s (blocked=%s)", card.name, bool(result.blocked))
+            # 終端状態に関わらず起票する（blocked でも踏んだバグは実在する）。例外は出さない
+            report = self.proposals.execute(result.proposals, project, parent=card)
             comment = self.finalize(card, meta.outcome, worktree, result)
         except Exception as e:
             # エラーでも動作が終わったらレビューを要求する。
@@ -90,6 +98,9 @@ class ProcessCardUsecase:
             logger.exception("card processing failed: %s", card.id)
             comment = f"🤖 エラー: {e}"
 
+        if not report.is_empty:
+            # 末尾に置く（_truncate_comment は末尾を優先して残す）
+            comment += "\n\n" + report.to_comment()
         card.add_comment(_truncate_comment(comment))
         card.move_to_review()
         logger.info("In review へ移動: %s", card.name)

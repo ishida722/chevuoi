@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from chevuoi.domain.entities.project import Project
+from chevuoi.domain.entities.task_proposal import TaskProposal
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 
 
@@ -21,6 +22,7 @@ class ExecutionResult(BaseModel):
     state: dict[str, Any]
     blocked: str = ""
     summary: str = ""
+    proposals: list[TaskProposal] = []  # ワークフローが ctx.propose で申告した追加タスク
 
 
 class GraphExecutor(ABC):
