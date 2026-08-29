@@ -64,3 +64,43 @@ def test_load_config_accepts_project_table_with_test_commands(tmp_path, monkeypa
     assert config.projects["short"].test_commands == []
     assert str(config.projects["full"].path) == "/repo/full"
     assert config.projects["full"].test_commands == ["uv run pytest -q", "uv run ruff check ."]
+
+
+def test_inbox_list_id_and_proposals_default(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'worktree_root = "/tmp/wt"\n'
+        "[trello]\n"
+        'ready_list_id = "r"\n'
+        'in_progress_list_id = "d"\n'
+        'in_review_list_id = "v"\n'
+        "[projects]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRELLO_KEY", "k")
+    monkeypatch.setenv("TRELLO_TOKEN", "t")
+    config = load_config(config_path)
+    assert config.trello.inbox_list_id is None
+    assert config.proposals.max_per_run == 3
+    assert config.proposals.max_generation == 2
+
+
+def test_inbox_list_id_and_proposals_from_toml(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'worktree_root = "/tmp/wt"\n'
+        "[trello]\n"
+        'ready_list_id = "r"\n'
+        'in_progress_list_id = "d"\n'
+        'in_review_list_id = "v"\n'
+        'inbox_list_id = "inbox"\n'
+        "[proposals]\n"
+        "max_per_run = 5\n"
+        "[projects]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRELLO_KEY", "k")
+    monkeypatch.setenv("TRELLO_TOKEN", "t")
+    config = load_config(config_path)
+    assert config.trello.inbox_list_id == "inbox"
+    assert config.proposals.max_per_run == 5

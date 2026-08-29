@@ -14,6 +14,10 @@ class WorktreeError(ChevuoiError):
     """git worktree の操作に失敗した。"""
 
 
+class CardIssueError(ChevuoiError):
+    """カードの発行に失敗した（Inbox 未設定・API エラーなど）。"""
+
+
 class WorkflowError(ChevuoiError):
     """ワークフローのロード・設定に失敗した。"""
 

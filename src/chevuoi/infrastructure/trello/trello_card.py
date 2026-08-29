@@ -1,9 +1,29 @@
 from __future__ import annotations
 
+import re
+
 from chevuoi.domain.entities.card import Card
 from chevuoi.domain.value_objects.card_id import CardId
 from chevuoi.infrastructure.config.settings import TrelloConfig
 from chevuoi.infrastructure.trello.client import TrelloClient
+
+
+# 自動起票カードの本文末尾に TrelloCardIssuer が書く機械可読フッター
+# 例: "vuoi: key=3f9a1c2b7d4e parent=trello:VsK3d4Jp generation=1 kind=bug"
+# 行内空白（[ \t]）だけを区切りにし、キーに = を含めないことで行跨ぎと指数的バックトラックを防ぐ
+FOOTER_LINE = re.compile(r"^vuoi:((?:[ \t]+[^\s=]+=\S*)+)[ \t]*$", re.MULTILINE)
+
+
+def parse_footer(desc: str) -> dict[str, str]:
+    """本文から vuoi: フッターの属性を読む。無ければ空 dict。複数あれば最後を採る。"""
+    matches = FOOTER_LINE.findall(desc)
+    if not matches:
+        return {}
+    attrs: dict[str, str] = {}
+    for token in matches[-1].split():
+        key, _, value = token.partition("=")
+        attrs[key] = value
+    return attrs
 
 
 class TrelloCard(Card):
@@ -45,6 +65,20 @@ class TrelloCard(Card):
     @property
     def url(self) -> str:
         return self._url
+
+    @property
+    def generation(self) -> int:
+        try:
+            return int(parse_footer(self._desc).get("generation", 0))
+        except ValueError:
+            return 0
+
+    @property
+    def parent_id(self) -> CardId | None:
+        source, sep, external_id = parse_footer(self._desc).get("parent", "").partition(":")
+        if not sep or not source or not external_id:
+            return None
+        return CardId(source=source, external_id=external_id)
 
     def claim(self) -> bool:
         """In Progress へ移動してクレームする。

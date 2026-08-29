@@ -14,6 +14,15 @@ class TrelloConfig(BaseModel):
     ready_list_id: str
     in_progress_list_id: str
     in_review_list_id: str
+    inbox_list_id: str | None = None  # 未設定なら起票は CardIssueError になり、コメントで可視化される
+
+
+class ProposalsConfig(BaseModel):
+    """副次タスク起票の歯止め（仕様 proposals）。"""
+
+    max_per_run: int = 3  # 1 ランの上限。超過分は要約カード 1 枚にまとめる
+    # この深度以上の親からは起票しない（人間起票=0 → 自動起票=1 → その自動起票=2 で止まる）
+    max_generation: int = 2
 
 
 class LlmConfig(BaseModel):
@@ -37,6 +46,7 @@ class AppConfig(BaseModel):
     workflows_dir: Path | None = None  # None なら load_config で既定値に解決される
     llm: LlmConfig | None = None  # 未設定でもスキャン・一覧は動く
     workflow_defaults: dict[str, Any] = {}
+    proposals: ProposalsConfig = ProposalsConfig()
 
     @field_validator("projects", mode="before")
     @classmethod

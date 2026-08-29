@@ -1,10 +1,14 @@
 from pathlib import Path
 
 from chevuoi.application.usecases.gc_usecase import GcUsecase
+from chevuoi.application.usecases.issue_card_usecase import IssueCardUsecase
+from chevuoi.application.usecases.issue_proposals_usecase import IssueProposalsUsecase
 from chevuoi.application.usecases.process_card_usecase import ProcessCardUsecase
 from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
 from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
+from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.routing_decision import RoutingDecision
+from chevuoi.domain.entities.task_proposal import TaskProposal
 from chevuoi.domain.entities.workflow_meta import ScanResult, WorkflowMeta
 from chevuoi.domain.entities.worktree import Worktree
 from chevuoi.domain.ports.graph_executor import ExecutionResult
@@ -12,8 +16,15 @@ from chevuoi.domain.ports.workflow_loader import LoadedWorkflow, WorkflowLoader
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
 from chevuoi.domain.value_objects.branch_name import BranchName
+from chevuoi.domain.value_objects.project_tag import ProjectTag
 from chevuoi.infrastructure.config.settings import AppConfig, ProjectConfig, TrelloConfig
-from tests.unit.fakes import FakeCard, FakeExecutor, FakePublisher, FakeWorktreeManager
+from tests.unit.fakes import (
+    FakeCard,
+    FakeCardIssuer,
+    FakeExecutor,
+    FakePublisher,
+    FakeWorktreeManager,
+)
 
 
 def make_config(projects: dict[str, Path | ProjectConfig] | None = None) -> AppConfig:
@@ -57,6 +68,7 @@ def make_usecase(
     projects=None,
     exc=None,
     changes=True,
+    issuer: FakeCardIssuer | None = None,
 ):
     result = result or ExecutionResult(output="", state={}, summary="やった")
     worktrees = FakeWorktreeManager()
@@ -65,8 +77,20 @@ def make_usecase(
     selector = SelectWorkflowUsecase(registry, FixedRouter(workflow))
     executor = FakeExecutor(result, exc=exc)
     publisher = FakePublisher()
-    usecase = ProcessCardUsecase(worktrees, selector, registry, executor, publisher, make_config(projects))
+    config = make_config(projects)
+    proposals = IssueProposalsUsecase(IssueCardUsecase(issuer or FakeCardIssuer()), config)
+    usecase = ProcessCardUsecase(
+        worktrees, selector, registry, executor, publisher, config, proposals
+    )
     return usecase, worktrees, executor, publisher
+
+
+def proposal(title: str, **kw) -> TaskProposal:
+    return TaskProposal(title=title, **kw)
+
+
+def result_with(*proposals: TaskProposal, **kw) -> ExecutionResult:
+    return ExecutionResult(output="", state={}, summary="やった", proposals=list(proposals), **kw)
 
 
 class TestProcessCardUsecase:
@@ -147,6 +171,92 @@ class TestProcessCardUsecase:
         project = executor.calls[0]["project"]
         assert project.repo_path == Path("/repo/mirai")
         assert project.test_commands == ["uv run pytest -q"]
+
+
+class TestProcessCardProposals:
+    def test_issued_url_is_appended_to_comment(self):
+        issuer = FakeCardIssuer()
+        usecase, _, _, _ = make_usecase(result_with(proposal("flaky test")), issuer=issuer)
+        card = FakeCard("MIRAI ログイン修正")
+        usecase.execute(card)
+        req = issuer.requests[0]
+        assert req.title == "flaky test" and req.project_tag.value == "MIRAI"
+        assert req.parent == card.id and req.generation == 1 and req.parent_url == card.url
+        comment = card.comments[0]
+        assert comment.startswith("やった\n\n🤖 PR: https://x/pr/1")
+        assert comment.endswith("🤖 起票:\n- 新規: https://example.com/new1")
+        assert card.moved_to_review
+
+    def test_blocked_run_still_issues(self):
+        issuer = FakeCardIssuer()
+        usecase, _, _, _ = make_usecase(
+            result_with(proposal("bug"), blocked="テスト失敗"), issuer=issuer
+        )
+        card = FakeCard("MIRAI x")
+        usecase.execute(card)
+        assert len(issuer.requests) == 1
+        assert "🤖 blocked" in card.comments[0] and "https://example.com/new1" in card.comments[0]
+
+    def test_issue_error_does_not_break_finalize(self):
+        issuer = FakeCardIssuer(error="inbox 未設定")
+        usecase, _, _, publisher = make_usecase(result_with(proposal("bug")), issuer=issuer)
+        card = FakeCard("MIRAI x")
+        usecase.execute(card)
+        assert publisher.calls  # PR は作られている
+        assert "🤖 PR: https://x/pr/1" in card.comments[0]
+        assert "見送り: 起票失敗（inbox 未設定）: bug" in card.comments[0]
+        assert card.moved_to_review
+
+    def test_overflow_creates_single_summary_card(self):
+        issuer = FakeCardIssuer()
+        usecase, _, _, _ = make_usecase(
+            result_with(*[proposal(f"p{i}") for i in range(5)]), issuer=issuer
+        )
+        card = FakeCard("MIRAI x")
+        usecase.execute(card)
+        titles = [r.title for r in issuer.requests]
+        assert titles == ["p0", "p1", "p2", "2 件の問題を検出"]
+        assert "p3" in issuer.requests[3].body and "p4" in issuer.requests[3].body
+        assert "要約カード（新規）: https://example.com/new4" in card.comments[0]
+
+    def test_rerun_reuses_cards_idempotently(self):
+        issuer = FakeCardIssuer()
+        usecase, _, _, _ = make_usecase(
+            result_with(*[proposal(f"p{i}") for i in range(4)]), issuer=issuer
+        )
+        usecase.execute(FakeCard("MIRAI x"))
+        card = FakeCard("MIRAI x")
+        usecase.execute(card)
+        assert len(issuer.requests) == 4  # 2 回目は 1 枚も増えない（要約カード含む）
+        assert "既存: https://example.com/new1" in card.comments[0]
+        assert "要約カード（既存）" in card.comments[0]
+
+    def test_deep_generation_is_rejected(self):
+        issuer = FakeCardIssuer()
+        usecase, _, _, _ = make_usecase(result_with(proposal("bug")), issuer=issuer)
+        card = FakeCard("MIRAI 孫", generation=2)
+        usecase.execute(card)
+        assert issuer.requests == []
+        assert "見送り: 世代深度の上限: bug" in card.comments[0]
+
+    def test_no_proposals_leaves_comment_unchanged(self):
+        usecase, _, _, _ = make_usecase()
+        card = FakeCard("MIRAI x")
+        usecase.execute(card)
+        assert card.comments == ["やった\n\n🤖 PR: https://x/pr/1"]
+
+    def test_evidence_goes_into_body_and_key_is_deterministic(self):
+        issuer = FakeCardIssuer()
+        usecase = IssueCardUsecase(issuer)
+        project = Project(tag=ProjectTag(value="MIRAI"), repo_path=Path("/r"))
+        p = proposal("bug", body="本文", evidence=("src/a.py:1",))
+        usecase.execute(p, project, parent=FakeCard("MIRAI 親"))
+        req = issuer.requests[0]
+        assert req.body == "本文\n\n根拠:\n- src/a.py:1"
+        assert req.idempotency_key == p.key(FakeCard("MIRAI 親").id)
+        # 親なし（CLI）は generation=0
+        usecase.execute(proposal("cli"), project)
+        assert issuer.requests[1].generation == 0 and issuer.requests[1].parent is None
 
 
 class TestGcUsecase:

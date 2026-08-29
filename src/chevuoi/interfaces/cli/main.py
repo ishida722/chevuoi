@@ -8,11 +8,15 @@ from pathlib import Path
 from injector import Injector
 
 from chevuoi.application.usecases.gc_usecase import GcUsecase
+from chevuoi.application.usecases.issue_card_usecase import IssueCardUsecase
 from chevuoi.application.usecases.run_usecase import RunUsecase
 from chevuoi.application.usecases.run_workflow_usecase import RunWorkflowUsecase
 from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
 from chevuoi.application.usecases.workflow_report_usecase import WorkflowReportUsecase
-from chevuoi.domain.exceptions import WorkflowError
+from chevuoi.domain.entities.project import Project
+from chevuoi.domain.entities.task_proposal import TaskProposal
+from chevuoi.domain.exceptions import CardIssueError, WorkflowError
+from chevuoi.domain.value_objects.project_tag import ProjectTag
 from chevuoi.infrastructure.config.settings import load_config
 from chevuoi.interface.di_modules import AppModule
 from chevuoi.interfaces.cli.adhoc_card import AdhocCard
@@ -54,6 +58,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     workflow_select.add_argument("title", help="カードのタイトル")
     workflow_select.add_argument("desc", nargs="?", default="", help="カードの本文（省略可）")
+    card = sub.add_parser("card", help="カードの操作")
+    card_sub = card.add_subparsers(dest="card_command", required=True)
+    card_issue = card_sub.add_parser(
+        "issue", help="Inbox にカードを 1 枚発行する（発行サービスの動作確認）"
+    )
+    card_issue.add_argument("tag", help="プロジェクトタグ（タイトル先頭に前置される）")
+    card_issue.add_argument("title", help="カードのタイトル（タグを除く）")
+    card_issue.add_argument("--body", default="", help="カードの本文")
+    card_issue.add_argument(
+        "--kind", default="chore", choices=["bug", "chore", "spike", "debt"], help="種別"
+    )
     return parser.parse_args(argv)
 
 
@@ -90,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
                             k: v for k, v in result.state.items() if k != "messages"
                         }
                         print(extra if extra else "(出力なし)")
+                    if result.proposals:
+                        # プロジェクトが無いので起票はしない。申告内容の確認用に表示する
+                        print(f"\n申告された追加タスク ({len(result.proposals)} 件):")
+                        for p in result.proposals:
+                            evidence = f" ({', '.join(p.evidence)})" if p.evidence else ""
+                            print(f"- [{p.kind}] {p.title}{evidence}")
                 case "select":
                     meta, decision = injector.get(SelectWorkflowUsecase).execute(
                         AdhocCard(args.title, args.desc)
@@ -99,6 +120,21 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"確信度: {decision.confidence}")
                     print(f"理由: {decision.reason}")
                     return 0 if meta else 2
+        case "card":
+            match args.card_command:
+                case "issue":
+                    tag = args.tag.strip()
+                    if not tag or " " in tag:
+                        print("tag は空白を含まない 1 語で指定してください", file=sys.stderr)
+                        return 1
+                    project = Project(tag=ProjectTag(value=tag), repo_path=Path("."))
+                    proposal = TaskProposal(title=args.title, body=args.body, kind=args.kind)
+                    try:
+                        issued = injector.get(IssueCardUsecase).execute(proposal, project)
+                    except CardIssueError as e:
+                        print(str(e), file=sys.stderr)
+                        return 1
+                    print(f"{'発行' if issued.created else '既存'}: {issued.url}")
     return 0
 
 
