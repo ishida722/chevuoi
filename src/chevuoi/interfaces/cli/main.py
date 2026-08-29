@@ -22,6 +22,8 @@ from chevuoi.interface.di_modules import AppModule
 from chevuoi.interfaces.cli.adhoc_card import AdhocCard
 
 DEFAULT_CONFIG = Path.home() / ".config" / "vuoi" / "config.toml"
+# 標準エラー・ログファイル共通の書式。行頭に日付時刻を付けて後から追えるようにする
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
 def setup_file_logging(log_file: Path) -> None:
@@ -32,9 +34,7 @@ def setup_file_logging(log_file: Path) -> None:
     """
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(log_file, encoding="utf-8")
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logging.getLogger().addHandler(handler)
 
 
@@ -73,7 +73,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     # httpx の INFO ログはリクエスト URL（key/token の認証クエリ）を出すため抑止する
     logging.getLogger("httpx").setLevel(logging.WARNING)
     args = parse_args(argv)
