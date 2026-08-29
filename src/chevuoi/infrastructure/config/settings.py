@@ -29,6 +29,14 @@ class LlmConfig(BaseModel):
     model: str  # 例: "claude-sonnet-5"。認証はプロバイダ既定の環境変数に委ねる
 
 
+class RouterConfig(BaseModel):
+    """[router] の内容。ワークフロー選択（ClaudeWorkflowRouter）専用の設定。"""
+
+    # claude --model に渡す値（例: "haiku"）。None なら Claude Code の既定モデル。
+    # LlmConfig.model（langchain のモデル ID）とは別物
+    model: str | None = None
+
+
 class ProjectConfig(BaseModel):
     """[projects.<tag>] の内容。TOML では文字列（パスのみ）でも書ける。"""
 
@@ -47,6 +55,7 @@ class AppConfig(BaseModel):
     llm: LlmConfig | None = None  # 未設定でもスキャン・一覧は動く
     workflow_defaults: dict[str, Any] = {}
     proposals: ProposalsConfig = ProposalsConfig()
+    router: RouterConfig = RouterConfig()  # セクション省略可
 
     @field_validator("projects", mode="before")
     @classmethod

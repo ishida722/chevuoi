@@ -167,7 +167,8 @@ class Runner(ABC):
     @abstractmethod
     def run(self, prompt: str, *, cwd: Path | None = None,
             session_id: str | None = None,
-            allowed_tools: Sequence[str] | None = None) -> RunResult: ...
+            allowed_tools: Sequence[str] | None = None,
+            model: str | None = None) -> RunResult: ...
 
 
 @dataclass(frozen=True)
@@ -217,7 +218,7 @@ __all__ = ["API_VERSION", "PROPOSAL_PROMPT", "BaseState", "ProjectInfo", "Propos
 
 `WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
 
-- **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う
+- **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う。`model` に Claude Code のエイリアス（`"haiku"` / `"sonnet"` 等）または完全名（例: `"claude-haiku-4-5-20251001"`）を渡すと、その呼び出しだけモデルを切り替えられる（`None` なら Claude Code の既定）。分類は軽く・実装は重く、といった使い分けをノード単位でできる。`Runner` を自前実装する場合もこの引数を受け取ること
 - **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
 - **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
 - **`project`**: 対象プロジェクトの情報。`vuoi run` ではカードのタグで解決したプロジェクト、`vuoi workflow run` など対象が無い実行では `None`。**ゲートの中身（`test_commands`）はプロジェクトが持ち、ゲートを置くか・何回試すかはワークフローが決める**（{doc}`routes`）。ゲート有りのワークフローは未設定時に通過扱いにせず `blocked` で止める
@@ -384,6 +385,15 @@ reg.get(name: str)               -> CompiledStateGraph    # 遅延ロード + �
 3. **棄権**: 返った名前が候補に無い、解析不能、確信度が high でない → 選択なし（`needs_human`）。必ずどれかを選ばされるルーターは必ず間違えるため、棄権パスは外さない
 
 ワークフローを増やしてもルーター側の変更は不要で、精度は各ワークフローの `when_to_use`（特に「〜なら X を使う」という除外条件）で上げます。`vuoi workflow select <title> [desc]` で判断を手元で確認できます。
+
+ルーターは候補から名前を 1 つ選ぶだけなので、`config.toml` の `[router]` で軽量モデルを指定することを推奨します（未指定なら Claude Code の既定モデル）:
+
+```toml
+[router]
+model = "haiku"   # エイリアス。挙動を固定したければ完全名（例: "claude-haiku-4-5-20251001"）
+```
+
+`[router] model` は `claude --model` に渡す値で、`[llm] model`（`ctx.llm` 用の langchain モデル ID）とは別物です。ルーターは `ctx.llm` を使わないため、`[llm]` の有無や値は選択に影響しません。
 
 ### ワークフローが返すもの・ホストが行う終端処理
 

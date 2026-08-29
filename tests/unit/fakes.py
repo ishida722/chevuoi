@@ -14,6 +14,23 @@ from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.domain.value_objects.branch_name import BranchName
 from chevuoi.domain.value_objects.card_id import CardId
+from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
+
+
+def make_config(**overrides) -> AppConfig:
+    """最小構成の AppConfig。必要な項目だけ overrides で上書きする。"""
+    return AppConfig(
+        trello=TrelloConfig(
+            api_key="k",
+            api_token="t",
+            ready_list_id="r",
+            in_progress_list_id="p",
+            in_review_list_id="v",
+        ),
+        projects={},
+        worktree_root="/tmp",
+        **overrides,
+    )
 
 
 class FakeCard(Card):

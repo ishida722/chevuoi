@@ -83,6 +83,7 @@ def test_inbox_list_id_and_proposals_default(tmp_path, monkeypatch):
     assert config.trello.inbox_list_id is None
     assert config.proposals.max_per_run == 3
     assert config.proposals.max_generation == 2
+    assert config.router.model is None
 
 
 def test_inbox_list_id_and_proposals_from_toml(tmp_path, monkeypatch):
@@ -104,3 +105,22 @@ def test_inbox_list_id_and_proposals_from_toml(tmp_path, monkeypatch):
     config = load_config(config_path)
     assert config.trello.inbox_list_id == "inbox"
     assert config.proposals.max_per_run == 5
+
+
+def test_router_model_from_toml(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'worktree_root = "/tmp/wt"\n'
+        "[trello]\n"
+        'ready_list_id = "r"\n'
+        'in_progress_list_id = "d"\n'
+        'in_review_list_id = "v"\n'
+        "[router]\n"
+        'model = "haiku"\n'
+        "[projects]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TRELLO_KEY", "k")
+    monkeypatch.setenv("TRELLO_TOKEN", "t")
+    config = load_config(config_path)
+    assert config.router.model == "haiku"

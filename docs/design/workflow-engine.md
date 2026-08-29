@@ -262,7 +262,7 @@ llm
 : `LlmFactory` ポート（ドメイン層に新設する小さな ABC）経由で取得します。MVP の実装は `AppConfig.llm` の設定（モデル名・API キー環境変数名）から `BaseChatModel` を 1 つ構築する `LangchainLlmFactory` です。`BaseChatModel` 型はインフラ層と SDK にしか現れません。`[llm]` 未設定なら `None` を注入します（runner だけで完結するワークフローは追加設定なしで動く）。
 
 runner
-: SDK の `Runner` ABC（`vuoi_sdk` が契約を持つ）。実装は `ClaudeCliRunner`（`claude -p --output-format json` の subprocess 実行、`--resume` によるセッション継続、`node_timeout_sec` の適用、コスト・セッション ID の構造化取得）。カード処理用の `NodeRunner` とは契約が異なる（Worktree 前提でなく、構造化結果を返す）ため別ポートとする。失敗は `RunResult(ok=False)` で返し、例外を投げない。
+: SDK の `Runner` ABC（`vuoi_sdk` が契約を持つ）。実装は `ClaudeCliRunner`（`claude -p --output-format json` の subprocess 実行、`--resume` によるセッション継続、`node_timeout_sec` の適用、`model` 引数による `--model` の付与（`None` なら付けない）、コスト・セッション ID の構造化取得）。モデルは呼び出しごとの引数とし、Runner インスタンスの属性にはしない（singleton の `Runner` を複製せずに、ノードごとの使い分けを可能にするため）。カード処理用の `NodeRunner` とは契約が異なる（Worktree 前提でなく、構造化結果を返す）ため別ポートとする。失敗は `RunResult(ok=False)` で返し、例外を投げない。
 
 settings
 : `{**config.workflow_defaults, **meta.settings}`。ホスト既定にワークフロー固有設定を上書きマージします。
@@ -279,11 +279,15 @@ class LlmConfig(BaseModel):
     model: str                          # 例: "claude-sonnet-5"
     # 認証はプロバイダ既定の環境変数に委ねる
 
+class RouterConfig(BaseModel):
+    model: str | None = None            # 例: "haiku"。None なら Claude Code の既定
+
 class AppConfig(BaseModel):
     ...  # 既存フィールド
     workflows_dir: Path | None = None   # None なら $XDG_CONFIG_HOME/vuoi/workflows
     llm: LlmConfig | None = None        # 未設定でもスキャン・一覧は動く
     workflow_defaults: dict[str, Any] = {}
+    router: RouterConfig = RouterConfig()   # [router] model: ルーターが claude --model に渡す値
 ```
 
 `workflows_dir` の既定値解決（`XDG_CONFIG_HOME` → `~/.config/vuoi/workflows`）は設定ロード時に行い、以降のコードは常に絶対パスを受け取ります。`llm` が未設定の場合も全機能が動作し、ワークフローには `ctx.llm = None` が注入されます（`ctx.llm` を使うワークフローだけが実行時に None を踏む）。
@@ -322,7 +326,7 @@ claim → project 解決（決定的） → SelectWorkflowUsecase
 
 ## ルーター（カード → ワークフロー）
 
-`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
+`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` と `model=config.router.model`（`[router] model`。未設定なら `None` で Claude Code の既定）で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
 
 ## テスト戦略
 
