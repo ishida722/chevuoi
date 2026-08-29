@@ -12,11 +12,11 @@ from chevuoi.domain.ports.workflow_loader import LoadedWorkflow, WorkflowLoader
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
 from chevuoi.domain.value_objects.branch_name import BranchName
-from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
+from chevuoi.infrastructure.config.settings import AppConfig, ProjectConfig, TrelloConfig
 from tests.unit.fakes import FakeCard, FakeExecutor, FakePublisher, FakeWorktreeManager
 
 
-def make_config(projects: dict[str, Path] | None = None) -> AppConfig:
+def make_config(projects: dict[str, Path | ProjectConfig] | None = None) -> AppConfig:
     return AppConfig(
         trello=TrelloConfig(
             api_key="k", api_token="t",
@@ -139,6 +139,14 @@ class TestProcessCardUsecase:
         usecase, _, _, _ = make_usecase(projects={"wf": Path("/repo/wf")})
         project = usecase.resolve_project(FakeCard("Wf [dev]ドキュメント作成"))
         assert project.repo_path == Path("/repo/wf")
+
+    def test_project_test_commands_reach_executor(self):
+        cfg = ProjectConfig(path=Path("/repo/mirai"), test_commands=["uv run pytest -q"])
+        usecase, _, executor, _ = make_usecase(projects={"MIRAI": cfg})
+        usecase.execute(FakeCard("MIRAI ログイン修正"))
+        project = executor.calls[0]["project"]
+        assert project.repo_path == Path("/repo/mirai")
+        assert project.test_commands == ["uv run pytest -q"]
 
 
 class TestGcUsecase:

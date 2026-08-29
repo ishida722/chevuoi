@@ -44,7 +44,18 @@
 
 worktree の準備は、必要とする経路にだけ含めます。investigate / design はリポジトリの clone を必要としないため、無駄な clone と後始末が発生しません。
 
-ゲートの有無は経路が決め、ゲートの中身（実行コマンド）はプロジェクトが決めます。
+ゲートの有無は経路が決め、ゲートの中身（実行コマンド）はプロジェクトが決めます。実装上は `config.toml` の `[projects.<tag>].test_commands` が中身で、ワークフローは `ctx.project.test_commands` から読みます（{doc}`workflow-engine`）。
+
+```toml
+[projects]
+short = "/path/to/repo"            # 短縮形（test_commands なし）
+
+[projects.chevuoi]                 # テーブル形式は末尾にまとめる
+path = "/path/to/chevuoi"
+test_commands = ["uv run pytest -q tests/unit"]
+```
+
+ゲート有りの経路でコマンドが未設定なら、通過扱いにせず `blocked` で止めます。「ゲートを通ったように見える PR」を出さないためです。
 
 ## ノードへの入力の制限
 

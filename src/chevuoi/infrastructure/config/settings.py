@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class TrelloConfig(BaseModel):
@@ -20,9 +20,16 @@ class LlmConfig(BaseModel):
     model: str  # 例: "claude-sonnet-5"。認証はプロバイダ既定の環境変数に委ねる
 
 
+class ProjectConfig(BaseModel):
+    """[projects.<tag>] の内容。TOML では文字列（パスのみ）でも書ける。"""
+
+    path: Path
+    test_commands: list[str] = []  # テストゲートで実行するコマンド（worktree 内で順に実行）
+
+
 class AppConfig(BaseModel):
     trello: TrelloConfig
-    projects: dict[str, Path]
+    projects: dict[str, ProjectConfig]
     worktree_root: Path
     node_timeout_sec: int = 3600
     max_parallel: int = 4
@@ -30,6 +37,16 @@ class AppConfig(BaseModel):
     workflows_dir: Path | None = None  # None なら load_config で既定値に解決される
     llm: LlmConfig | None = None  # 未設定でもスキャン・一覧は動く
     workflow_defaults: dict[str, Any] = {}
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def _coerce_projects(cls, value: Any) -> Any:
+        """`tag = "/path"` の短縮形を `{path = "/path"}` に揃える。"""
+        if not isinstance(value, dict):
+            return value
+        return {
+            tag: {"path": v} if isinstance(v, (str, Path)) else v for tag, v in value.items()
+        }
 
 
 def default_workflows_dir() -> Path:

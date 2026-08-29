@@ -60,7 +60,21 @@ class Runner(ABC):
         """
 
 
+@dataclass(frozen=True)
+class ProjectInfo:
+    """実行対象プロジェクトの情報（ホストの設定から供給される）。
+
+    test_commands: テストゲートの中身。ゲートを置くか・何回試すかはワークフローが決め、
+                   何を実行するかはプロジェクトが決める。
+    """
+
+    name: str
+    path: Path
+    test_commands: tuple[str, ...] = ()
+
+
 _workdir: ContextVar[Path | None] = ContextVar("vuoi_workdir", default=None)
+_project: ContextVar[ProjectInfo | None] = ContextVar("vuoi_project", default=None)
 
 
 @contextmanager
@@ -76,6 +90,16 @@ def bind_workdir(path: Path) -> Iterator[None]:
         _workdir.reset(token)
 
 
+@contextmanager
+def bind_project(project: ProjectInfo) -> Iterator[None]:
+    """ホストが 1 回の実行に対象プロジェクトを束縛する。ワークフローは ctx.project で読む。"""
+    token = _project.set(project)
+    try:
+        yield
+    finally:
+        _project.reset(token)
+
+
 @dataclass(frozen=True)
 class WorkflowContext:
     """依存性注入。ユーザーは自前で LLM や接続を作らない。
@@ -84,6 +108,7 @@ class WorkflowContext:
     llm: 軽い 1 発呼び出し（分類・要約など）向け。設定に [llm] が無ければ None。
     workdir: この実行の作業ディレクトリ（カードの worktree など）。
              runner.run(cwd=ctx.workdir) や subprocess の cwd に渡す。
+    project: 対象プロジェクトの情報。カード起点でない実行（vuoi workflow run 等）では None。
     """
 
     llm: BaseChatModel | None
@@ -96,13 +121,19 @@ class WorkflowContext:
         bound = _workdir.get()
         return bound if bound is not None else Path.cwd()
 
+    @property
+    def project(self) -> ProjectInfo | None:
+        return _project.get()
+
 
 __all__ = [
     "API_VERSION",
     "BaseState",
+    "ProjectInfo",
     "RunResult",
     "Runner",
     "WorkflowContext",
+    "bind_project",
     "bind_workdir",
     "StateGraph",
     "START",
