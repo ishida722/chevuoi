@@ -171,6 +171,14 @@ class Runner(ABC):
 
 
 @dataclass(frozen=True)
+class ProjectInfo:
+    """実行対象プロジェクト（ホストの config.toml [projects.<tag>] から供給）"""
+    name: str
+    path: Path
+    test_commands: tuple[str, ...] = ()   # テストゲートの中身
+
+
+@dataclass(frozen=True)
 class WorkflowContext:
     """依存性注入。ユーザーは自前で LLM や接続を作らない"""
     llm: BaseChatModel | None
@@ -181,9 +189,12 @@ class WorkflowContext:
     @property
     def workdir(self) -> Path: ...   # この実行の作業ディレクトリ（ホストが束縛）
 
+    @property
+    def project(self) -> ProjectInfo | None: ...   # 対象プロジェクト（ホストが束縛）
 
-__all__ = ["API_VERSION", "BaseState", "RunResult", "Runner",
-           "WorkflowContext", "bind_workdir", "StateGraph", "START", "END"]
+
+__all__ = ["API_VERSION", "BaseState", "ProjectInfo", "RunResult", "Runner",
+           "WorkflowContext", "bind_project", "bind_workdir", "StateGraph", "START", "END"]
 ```
 
 `WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
@@ -191,6 +202,7 @@ __all__ = ["API_VERSION", "BaseState", "RunResult", "Runner",
 - **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う
 - **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
 - **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
+- **`project`**: 対象プロジェクトの情報。`vuoi run` ではカードのタグで解決したプロジェクト、`vuoi workflow run` など対象が無い実行では `None`。**ゲートの中身（`test_commands`）はプロジェクトが持ち、ゲートを置くか・何回試すかはワークフローが決める**（{doc}`routes`）。ゲート有りのワークフローは未設定時に通過扱いにせず `blocked` で止める
 - **推奨 state キー**: ホストの終端処理は最終 state の `blocked`（空でなければ撤退理由）と `result`（人間向け要約。PR 本文・カードコメントに使われる）を読む
 - `tools` は将来拡張
 

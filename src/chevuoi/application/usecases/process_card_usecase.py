@@ -80,7 +80,7 @@ class ProcessCardUsecase:
             workflow = self.registry.get(meta.name)
             logger.info("ワークフロー実行開始: %s (%s)", card.name, meta.name)
             result = self.executor.execute(
-                workflow, self.build_message(card), workdir=worktree.path
+                workflow, self.build_message(card), workdir=worktree.path, project=project
             )
             logger.info("ワークフロー実行終了: %s (blocked=%s)", card.name, bool(result.blocked))
             comment = self.finalize(card, meta.outcome, worktree, result)
@@ -123,14 +123,14 @@ class ProcessCardUsecase:
         tag = card.project_tag
         if tag is None:
             return NullProject()
-        repo_path = self.config.projects.get(tag.value)
-        if repo_path is None:
+        entry = self.config.projects.get(tag.value)
+        if entry is None:
             # タグの大文字小文字は無視する（例: "Wf" と "wf" を同一視）
             wanted = tag.value.casefold()
-            repo_path = next(
-                (path for key, path in self.config.projects.items() if key.casefold() == wanted),
+            entry = next(
+                (cfg for key, cfg in self.config.projects.items() if key.casefold() == wanted),
                 None,
             )
-        if repo_path is None:
+        if entry is None:
             return NullProject()
-        return Project(tag=tag, repo_path=repo_path)
+        return Project(tag=tag, repo_path=entry.path, test_commands=list(entry.test_commands))

@@ -80,10 +80,14 @@ class FakeExecutor(GraphExecutor):
         self.exc = exc
         self.calls: list[dict] = []
 
-    def execute(self, workflow: LoadedWorkflow, message: str, *, workdir=None) -> ExecutionResult:
+    def execute(
+        self, workflow: LoadedWorkflow, message: str, *, workdir=None, project=None
+    ) -> ExecutionResult:
         if self.exc is not None:
             raise self.exc
-        self.calls.append({"workflow": workflow, "message": message, "workdir": workdir})
+        self.calls.append(
+            {"workflow": workflow, "message": message, "workdir": workdir, "project": project}
+        )
         return self.result
 
 

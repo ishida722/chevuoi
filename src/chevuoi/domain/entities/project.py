@@ -12,6 +12,7 @@ class Project(BaseModel):
 
     tag: ProjectTag
     repo_path: Path
+    test_commands: list[str] = []  # テストゲートの中身。有無・回数はワークフローが決める
 
     @property
     def is_null(self) -> bool:

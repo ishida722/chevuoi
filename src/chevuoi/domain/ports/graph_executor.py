@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from chevuoi.domain.entities.project import Project
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 
 
@@ -29,5 +30,10 @@ class GraphExecutor(ABC):
 
     @abstractmethod
     def execute(
-        self, workflow: LoadedWorkflow, message: str, *, workdir: Path | None = None
+        self,
+        workflow: LoadedWorkflow,
+        message: str,
+        *,
+        workdir: Path | None = None,
+        project: Project | None = None,
     ) -> ExecutionResult: ...
