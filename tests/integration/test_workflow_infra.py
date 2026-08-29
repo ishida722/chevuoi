@@ -39,7 +39,7 @@ class FakeLlmFactory(LlmFactory):
 
 
 class FakeRunner(Runner):
-    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None):
+    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None, model=None):
         return RunResult(ok=True, output=f"fake: {prompt}")
 
 

@@ -12,7 +12,9 @@ from chevuoi.domain.ports.workflow_loader import WorkflowLoader
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
 from chevuoi.infrastructure.workflows.claude_workflow_router import ClaudeWorkflowRouter
+from chevuoi.infrastructure.config.settings import RouterConfig
 from chevuoi.interfaces.cli.adhoc_card import AdhocCard
+from tests.unit.fakes import make_config
 
 
 def meta(name: str, **kw) -> WorkflowMeta:
@@ -30,15 +32,19 @@ class ScriptedRunner(Runner):
     def __init__(self, output: str, ok: bool = True) -> None:
         self.output, self.ok, self.calls = output, ok, []
 
-    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None):
-        self.calls.append({"prompt": prompt, "allowed_tools": allowed_tools})
+    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None, model=None):
+        self.calls.append({"prompt": prompt, "allowed_tools": allowed_tools, "model": model})
         return RunResult(ok=self.ok, output=self.output)
 
 
 class TestClaudeWorkflowRouter:
-    def route(self, output, ok=True):
+    def route(self, output, ok=True, model=None):
         runner = ScriptedRunner(output, ok)
-        d = ClaudeWorkflowRouter(runner).route(AdhocCard("X: 調べて", "ログを調査"), [DEV, RESEARCH])
+        # model=None のときは [router] セクション省略（既定値）の経路を通す
+        config = make_config() if model is None else make_config(router=RouterConfig(model=model))
+        d = ClaudeWorkflowRouter(runner, config).route(
+            AdhocCard("X: 調べて", "ログを調査"), [DEV, RESEARCH]
+        )
         return d, runner
 
     def test_picks_candidate(self):
@@ -46,6 +52,14 @@ class TestClaudeWorkflowRouter:
         assert d.workflow == "research" and d.confidence == "high"
         assert runner.calls[0]["allowed_tools"] == ("Read", "Grep", "Glob")
         assert "when_to_use: 調査・報告書" in runner.calls[0]["prompt"]
+
+    def test_model_from_config_is_passed(self):
+        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}', model="haiku")
+        assert runner.calls[0]["model"] == "haiku"
+
+    def test_model_unset_passes_none(self):
+        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}')
+        assert runner.calls[0]["model"] is None
 
     def test_prompt_excludes_feasibility_from_confidence(self):
         # 資料の取得可否などの実行可能性を確信度に混ぜないルールが明記されている
@@ -71,7 +85,7 @@ class TestClaudeWorkflowRouter:
 
     def test_no_candidates_skips_runner(self):
         runner = ScriptedRunner("{}")
-        d = ClaudeWorkflowRouter(runner).route(AdhocCard("X: a"), [])
+        d = ClaudeWorkflowRouter(runner, make_config()).route(AdhocCard("X: a"), [])
         assert d.abstained and runner.calls == []
 
 

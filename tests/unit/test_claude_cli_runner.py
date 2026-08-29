@@ -8,24 +8,9 @@ from unittest.mock import patch
 
 import pytest
 
-from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
 from chevuoi.infrastructure.workflows.claude_cli_runner import ClaudeCliRunner
 from chevuoi.infrastructure.workflows.langchain_llm_factory import LangchainLlmFactory
-
-
-def make_config(**overrides) -> AppConfig:
-    return AppConfig(
-        trello=TrelloConfig(
-            api_key="k",
-            api_token="t",
-            ready_list_id="r",
-            in_progress_list_id="p",
-            in_review_list_id="v",
-        ),
-        projects={},
-        worktree_root="/tmp",
-        **overrides,
-    )
+from tests.unit.fakes import make_config
 
 
 def completed(stdout: str, returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
@@ -47,6 +32,14 @@ class TestBuildCommand:
         cmd = runner.build_command("続き", "sess-1")
         assert cmd[-2:] == ["--resume", "sess-1"]
 
+    def test_model(self, runner):
+        cmd = runner.build_command("やる", None, model="haiku")
+        assert cmd[-2:] == ["--model", "haiku"]
+
+    def test_empty_model_omits_option(self, runner):
+        # [router] model = "" のような設定で --model "" を渡さない
+        assert "--model" not in runner.build_command("やる", None, model="")
+
 
 class TestRun:
     def test_json_success(self, runner):
@@ -58,6 +51,12 @@ class TestRun:
         assert result.ok and result.output == "done"
         assert result.session_id == "s1" and result.cost_usd == 0.12
         assert m.call_args.kwargs["timeout"] == 42
+
+    def test_run_passes_model_to_command(self, runner):
+        payload = json.dumps({"result": "done", "session_id": "s1", "is_error": False})
+        with patch("subprocess.run", return_value=completed(payload)) as m:
+            runner.run("やる", model="haiku")
+        assert m.call_args.args[0][-2:] == ["--model", "haiku"]
 
     def test_is_error_flag(self, runner):
         payload = json.dumps({"result": "だめ", "session_id": "s1", "is_error": True})

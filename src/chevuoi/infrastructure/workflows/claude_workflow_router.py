@@ -13,6 +13,7 @@ from chevuoi.domain.entities.card import Card
 from chevuoi.domain.entities.routing_decision import RoutingDecision
 from chevuoi.domain.entities.workflow_meta import WorkflowMeta
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
+from chevuoi.infrastructure.config.settings import AppConfig
 
 logger = logging.getLogger("vuoi.workflows.router")
 
@@ -70,11 +71,13 @@ class ClaudeWorkflowRouter(WorkflowRouter):
     """claude -p に名前を 1 つ出させ、候補に実在するものだけを採用する。
 
     候補外の名前・解析不能・runner 失敗はすべて棄権として返す。
+    モデルは `[router] model` で指定する（分類だけなので軽量モデルで十分）。
     """
 
     @inject
-    def __init__(self, runner: Runner) -> None:
+    def __init__(self, runner: Runner, config: AppConfig) -> None:
         self._runner = runner
+        self._model = config.router.model
 
     def build_prompt(self, card: Card, candidates: list[WorkflowMeta]) -> str:
         return PROMPT_TEMPLATE.format(
@@ -92,6 +95,7 @@ class ClaudeWorkflowRouter(WorkflowRouter):
             self.build_prompt(card, candidates),
             cwd=cwd,
             allowed_tools=READ_ONLY_TOOLS,
+            model=self._model,
         )
         if not result.ok:
             logger.warning("ルーター実行失敗: %s", result.output)

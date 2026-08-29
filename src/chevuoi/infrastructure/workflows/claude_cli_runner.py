@@ -32,12 +32,15 @@ class ClaudeCliRunner(Runner):
         prompt: str,
         session_id: str | None,
         allowed_tools: Sequence[str] | None = None,
+        model: str | None = None,
     ) -> list[str]:
         cmd = ["claude", "-p", prompt, "--output-format", "json"]
         if session_id is not None:
             cmd += ["--resume", session_id]
         if allowed_tools is not None:
             cmd += ["--allowedTools", ",".join(allowed_tools)]
+        if model:  # 空文字列も未指定扱い（--model "" を claude に渡さない）
+            cmd += ["--model", model]
         return cmd
 
     def run(
@@ -47,10 +50,11 @@ class ClaudeCliRunner(Runner):
         cwd: Path | None = None,
         session_id: str | None = None,
         allowed_tools: Sequence[str] | None = None,
+        model: str | None = None,
     ) -> RunResult:
         try:
             proc = subprocess.run(
-                self.build_command(prompt, session_id, allowed_tools),
+                self.build_command(prompt, session_id, allowed_tools, model),
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -63,10 +67,11 @@ class ClaudeCliRunner(Runner):
 
         result = self._parse(proc)
         logger.info(
-            "claude 実行: ok=%s session=%s cost=%s",
+            "claude 実行: ok=%s session=%s cost=%s model=%s",
             result.ok,
             result.session_id,
             result.cost_usd,
+            model,
         )
         return result
 
