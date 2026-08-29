@@ -119,6 +119,15 @@ class TestProcessCardUsecase:
         assert publisher.calls == []
         assert card.comments == ["🤖 完了:\nやった"] and card.moved_to_review
 
+    def test_unknown_project_comments_and_moves_to_review(self):
+        usecase, _, executor, publisher = make_usecase()
+        card = FakeCard("texts 社内ブログ構成作成")
+        usecase.execute(card)
+        assert executor.calls == [] and publisher.calls == []
+        assert card.comments[0].startswith("🤖 needs_human: プロジェクトを特定できませんでした。")
+        assert "texts" in card.comments[0] and "MIRAI" in card.comments[0]
+        assert card.moved_to_review
+
     def test_blocked_comments_and_keeps_worktree(self):
         usecase, worktrees, _, publisher = make_usecase(
             ExecutionResult(output="", state={}, blocked="テスト2回失敗", summary="x")
@@ -148,16 +157,21 @@ class TestProcessCardUsecase:
         usecase.execute(card)
         assert worktrees.created == [] and card.comments == [] and not card.moved_to_review
 
-    def test_unknown_tag_skips_after_claim(self):
+    def test_unknown_tag_returns_to_human_after_claim(self):
         usecase, worktrees, _, _ = make_usecase(projects={})
         card = FakeCard("MIRAI x")
         usecase.execute(card)
-        assert worktrees.created == [] and not card.moved_to_review
-
-    def test_no_tag_skips(self):
-        usecase, worktrees, _, _ = make_usecase()
-        usecase.execute(FakeCard("タグなし"))
         assert worktrees.created == []
+        assert "MIRAI" in card.comments[0] and "(なし)" in card.comments[0]
+        assert card.moved_to_review
+
+    def test_no_tag_returns_to_human(self):
+        usecase, worktrees, _, _ = make_usecase()
+        card = FakeCard("タグなし")
+        usecase.execute(card)
+        assert worktrees.created == []
+        assert "プロジェクトタグがありません" in card.comments[0]
+        assert card.moved_to_review
 
     def test_tag_lookup_ignores_case(self):
         usecase, _, _, _ = make_usecase(projects={"wf": Path("/repo/wf")})

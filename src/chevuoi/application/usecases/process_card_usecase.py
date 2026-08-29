@@ -62,7 +62,20 @@ class ProcessCardUsecase:
 
         project = self.resolve_project(card)
         if project.is_null:
-            logger.warning("project not found, skip: %s", card.name)
+            # 放置すると In Progress に残って作業中と区別できないため、人間に返す
+            logger.warning("project not found: %s", card.name)
+            tag = card.project_tag
+            tag_text = f"タグ「{tag.value}」に対応するプロジェクトが設定にありません。" if tag else "タイトルにプロジェクトタグがありません。"
+            card.add_comment(
+                _truncate_comment(
+                    "🤖 needs_human: プロジェクトを特定できませんでした。"
+                    f"{tag_text}\n"
+                    "設定済みのプロジェクトタグをタイトル先頭に付けるか、設定にプロジェクトを追加してください。\n"
+                    f"設定済みタグ: {', '.join(self.config.projects) or '(なし)'}"
+                )
+            )
+            card.move_to_review()
+            logger.info("In review へ移動: %s", card.name)
             return
         logger.info("project 解決: %s -> %s", project.tag.value, project.repo_path)
 
