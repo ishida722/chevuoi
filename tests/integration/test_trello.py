@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from urllib.parse import parse_qsl
+
 import httpx
 
 from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
@@ -28,6 +30,10 @@ CARD_JSON = {
 }
 
 
+def _form(request: httpx.Request) -> dict[str, str]:
+    return dict(parse_qsl(request.content.decode()))
+
+
 class MockTrello:
     """httpx transport 差し替え用の最小 Trello サーバ。"""
 
@@ -43,7 +49,7 @@ class MockTrello:
         if path == "/1/cards/abc123" and request.method == "GET":
             return httpx.Response(200, json={"idList": self.card_list_id})
         if path == "/1/cards/abc123" and request.method == "PUT":
-            self.card_list_id = request.url.params["idList"]
+            self.card_list_id = _form(request)["idList"]
             return httpx.Response(200, json={})
         if path == "/1/cards/abc123/actions/comments":
             return httpx.Response(200, json={})
@@ -94,4 +100,4 @@ class TestTrelloCard:
         card.move_to_review()
         assert server.card_list_id == "review"
         comment_reqs = [r for r in server.requests if "comments" in r.url.path]
-        assert comment_reqs and comment_reqs[0].url.params["text"] == "done"
+        assert comment_reqs and _form(comment_reqs[0])["text"] == "done"

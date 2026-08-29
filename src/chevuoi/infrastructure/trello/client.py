@@ -37,9 +37,16 @@ class TrelloClient:
         return self._request("POST", path, params)
 
     def _request(self, method: str, path: str, params: dict[str, Any] | None) -> Any:
-        response = self._client.request(
-            method, path, params={**self._auth_params, **(params or {})}
-        )
+        # 認証情報は常にクエリで送る。POST/PUT の本体パラメータはフォームボディで送る
+        # （コメント本文のような長い値をクエリに載せると URL 長超過で 414 になるため）
+        if method == "GET":
+            response = self._client.request(
+                method, path, params={**self._auth_params, **(params or {})}
+            )
+        else:
+            response = self._client.request(
+                method, path, params=self._auth_params, data=params or {}
+            )
         if response.is_error:
             # URL に認証クエリが含まれるため、raise_for_status は使わず
             # key/token を含まないメッセージで投げ直す（ログ・stderr への漏洩防止）
