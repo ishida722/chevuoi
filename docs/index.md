@@ -28,4 +28,5 @@ spec/workflow-engine
 
 design/mvp
 design/workflow-engine
+design/execution-log
 ```
