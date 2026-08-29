@@ -5,6 +5,7 @@ from injector import Binder, Module, singleton
 from vuoi_sdk import Runner
 
 from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
+from chevuoi.domain.ports.card_issuer import CardIssuer
 from chevuoi.domain.ports.card_provider import CardProvider
 from chevuoi.domain.ports.graph_executor import GraphExecutor
 from chevuoi.domain.ports.llm_factory import LlmFactory
@@ -17,6 +18,7 @@ from chevuoi.infrastructure.config.settings import AppConfig
 from chevuoi.infrastructure.git.gh_pull_request_publisher import GhPullRequestPublisher
 from chevuoi.infrastructure.git.git_worktree_manager import GitWorktreeManager
 from chevuoi.infrastructure.trello.client import TrelloClient
+from chevuoi.infrastructure.trello.trello_card_issuer import TrelloCardIssuer
 from chevuoi.infrastructure.trello.trello_card_provider import TrelloCardProvider
 from chevuoi.infrastructure.workflows.claude_cli_runner import ClaudeCliRunner
 from chevuoi.infrastructure.workflows.claude_workflow_router import ClaudeWorkflowRouter
@@ -34,6 +36,8 @@ class AppModule(Module):
         binder.bind(AppConfig, to=self._config, scope=singleton)
         binder.bind(TrelloClient, scope=singleton)
         binder.bind(CardProvider, to=TrelloCardProvider, scope=singleton)  # type: ignore[type-abstract]
+        binder.bind(CardIssuer, to=TrelloCardIssuer, scope=singleton)  # type: ignore[type-abstract]
+        # IssueCardUsecase / IssueProposalsUsecase は @inject の自動解決に任せる（bind 不要）
         binder.bind(WorktreeManager, to=GitWorktreeManager, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(PullRequestPublisher, to=GhPullRequestPublisher, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowScanner, to=FsWorkflowScanner, scope=singleton)  # type: ignore[type-abstract]

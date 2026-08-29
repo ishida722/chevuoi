@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from chevuoi.domain.entities.card import Card
+from chevuoi.domain.entities.issue_report import IssuedCard
 from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.worktree import Worktree
+from chevuoi.domain.exceptions import CardIssueError
+from chevuoi.domain.ports.card_issuer import CardIssueRequest, CardIssuer
 from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
@@ -16,10 +19,18 @@ from chevuoi.domain.value_objects.card_id import CardId
 class FakeCard(Card):
     """操作を記録するだけのインメモリ Card 実装。"""
 
-    def __init__(self, name: str, *, claimable: bool = True, external_id: str = "x1") -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        claimable: bool = True,
+        external_id: str = "x1",
+        generation: int = 0,
+    ) -> None:
         self._name = name
         self._claimable = claimable
         self._external_id = external_id
+        self._generation = generation
         self.comments: list[str] = []
         self.moved_to_review = False
 
@@ -47,6 +58,38 @@ class FakeCard(Card):
 
     def move_to_review(self) -> None:
         self.moved_to_review = True
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+
+class FakeCardIssuer(CardIssuer):
+    """発行要求を記録し、冪等キーで既存を返すインメモリ CardIssuer。"""
+
+    def __init__(self, *, error: str | None = None) -> None:
+        self.error = error
+        self.requests: list[CardIssueRequest] = []
+        self.by_key: dict[str, IssuedCard] = {}
+
+    def find_by_key(self, key: str) -> IssuedCard | None:
+        return self.by_key.get(key)
+
+    def issue(self, request: CardIssueRequest) -> IssuedCard:
+        if self.error:
+            raise CardIssueError(self.error)
+        existing = self.by_key.get(request.idempotency_key)
+        if existing is not None:
+            return existing
+        self.requests.append(request)
+        n = len(self.requests)
+        issued = IssuedCard(
+            id=CardId(source="fake", external_id=f"new{n}"),
+            url=f"https://example.com/new{n}",
+            created=True,
+        )
+        self.by_key[request.idempotency_key] = issued.model_copy(update={"created": False})
+        return issued
 
 
 class FakeWorktreeManager(WorktreeManager):

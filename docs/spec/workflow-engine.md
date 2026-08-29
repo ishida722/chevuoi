@@ -179,6 +179,18 @@ class ProjectInfo:
 
 
 @dataclass(frozen=True)
+class Proposal:
+    """ワークフローが申告する追加タスク。起票するかどうかはホストが決める"""
+    title: str
+    body: str = ""
+    kind: Literal["bug", "chore", "spike", "debt"] = "chore"
+    evidence: tuple[str, ...] = ()   # 例: ("src/foo.py:142",)
+
+
+PROPOSAL_PROMPT: str   # LLM に ```vuoi-proposal``` ブロックで報告させるプロンプト断片
+
+
+@dataclass(frozen=True)
 class WorkflowContext:
     """依存性注入。ユーザーは自前で LLM や接続を作らない"""
     llm: BaseChatModel | None
@@ -192,9 +204,15 @@ class WorkflowContext:
     @property
     def project(self) -> ProjectInfo | None: ...   # 対象プロジェクト（ホストが束縛）
 
+    def propose(self, title: str, *, body: str = "", kind: str = "chore",
+                evidence: Sequence[str] = ()) -> None: ...   # 追加タスクを申告
 
-__all__ = ["API_VERSION", "BaseState", "ProjectInfo", "RunResult", "Runner",
-           "WorkflowContext", "bind_project", "bind_workdir", "StateGraph", "START", "END"]
+    def propose_from_output(self, text: str) -> int: ...   # 出力中の vuoi-proposal ブロックを申告
+
+
+__all__ = ["API_VERSION", "PROPOSAL_PROMPT", "BaseState", "ProjectInfo", "Proposal",
+           "RunResult", "Runner", "WorkflowContext", "bind_project", "bind_proposals",
+           "bind_workdir", "StateGraph", "START", "END"]
 ```
 
 `WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
@@ -203,6 +221,8 @@ __all__ = ["API_VERSION", "BaseState", "ProjectInfo", "RunResult", "Runner",
 - **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
 - **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
 - **`project`**: 対象プロジェクトの情報。`vuoi run` ではカードのタグで解決したプロジェクト、`vuoi workflow run` など対象が無い実行では `None`。**ゲートの中身（`test_commands`）はプロジェクトが持ち、ゲートを置くか・何回試すかはワークフローが決める**（{doc}`routes`）。ゲート有りのワークフローは未設定時に通過扱いにせず `blocked` で止める
+- **`propose(title, *, body, kind, evidence)`**: 作業中に見つけた範囲外の問題を追加タスクとして申告する（{doc}`proposals`）。任意のノード・ヘルパー関数から呼べる。起票するか・どこへ・何件まではホストが決め、`vuoi run` では終端状態に関わらずラン終了時に Inbox へ起票して結果を親カードにコメントする。`vuoi workflow run` では起票せず申告内容を表示するだけ。ホストの束縛外（自前のスレッドプール内など）で呼ぶと警告ログを出して捨てる
+- **`propose_from_output(text)`**: runner の出力から ```` ```vuoi-proposal ```` ブロック（JSON: `title` 必須、`kind` / `evidence` / `body` 任意）を抜き出して `propose` する。申告した件数を返す。壊れた JSON や `title` の無いブロックは警告して読み飛ばす。プロンプトには `PROPOSAL_PROMPT` を連結して LLM に形式を指示する
 - **推奨 state キー**: ホストの終端処理は最終 state の `blocked`（空でなければ撤退理由）と `result`（人間向け要約。PR 本文・カードコメントに使われる）を読む
 - `tools` は将来拡張
 
@@ -240,6 +260,9 @@ def build(ctx: WorkflowContext) -> StateGraph:
 ### runner を使う例（Claude Code をノードにする）
 
 ```python
+from vuoi_sdk import PROPOSAL_PROMPT
+
+
 class State(BaseState):
     session_id: str | None
 
@@ -249,10 +272,12 @@ def build(ctx: WorkflowContext) -> StateGraph:
 
     def implement(state: State):
         r = ctx.runner.run(
-            "テストを通す実装をして", cwd=ctx.workdir, session_id=state.get("session_id")
+            "テストを通す実装をして\n\n" + PROPOSAL_PROMPT,   # 範囲外の問題は直さず報告させる
+            cwd=ctx.workdir, session_id=state.get("session_id"),
         )
         if not r.ok:
             ctx.logger.error("実行失敗: %s", r.output)
+        ctx.propose_from_output(r.output)   # 報告された問題をホストに申告（起票はホストが判断）
         return {"session_id": r.session_id}
 
     g.add_node("implement", implement)

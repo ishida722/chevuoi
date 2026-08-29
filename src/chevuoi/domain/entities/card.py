@@ -47,3 +47,13 @@ class Card(ABC):
     def project_tag(self) -> ProjectTag | None:
         """タイトル先頭のタグ（例: "MIRAI ログイン修正" → MIRAI）。無ければ None。"""
         return ProjectTag.from_title(self.name)
+
+    @property
+    def generation(self) -> int:
+        """世代深度。人間起票 = 0。自動起票されるたびに +1。"""
+        return 0
+
+    @property
+    def parent_id(self) -> CardId | None:
+        """自動起票の親カード。人間起票なら None。"""
+        return None
