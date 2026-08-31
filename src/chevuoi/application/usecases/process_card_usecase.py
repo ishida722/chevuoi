@@ -18,14 +18,72 @@ from chevuoi.infrastructure.config.settings import AppConfig
 
 logger = logging.getLogger(__name__)
 
-# Trello のコメント上限（16384 文字）に収める。PR URL は末尾に出るので末尾を優先して残す
+# Trello のコメント上限（16384 文字）に収める
 MAX_COMMENT_LEN = 16000
+
+# 自動処理が残すコメントの印。これが付いたコメントは人間の指示ではない
+BOT_MARK = "🤖"
+
+# プロンプトに載せるレビューコメントの総量上限。超えたら新しいコメントを優先して残す
+MAX_REVIEW_COMMENTS_LEN = 8000
+
+
+def _is_bot_comment(text: str) -> bool:
+    # 自動処理のコメントは 1 行目が 🤖 で始まる。人間が本文の途中で 🤖 行を引用しても
+    # 誤爆しないよう 1 行目だけで判定する。旧形式の PR コメントだけは summary の後に
+    # "🤖 PR:" 行が来るため、互換のためそれも自動処理とみなす
+    return text.startswith(BOT_MARK) or any(
+        line.startswith(f"{BOT_MARK} PR:") for line in text.splitlines()
+    )
+
+
+def _select_human_comments(comments: list[str]) -> list[str]:
+    """直近の自動処理コメントより新しい人間コメントを、総量上限内で古い順に返す。
+
+    それより古い人間コメントは前回実行が読んでいるため再送しない（対応済みの
+    指示を「必ず対応すること」として繰り返さない）。上限超過時は新しい方を残す。
+    """
+    selected: list[str] = []
+    total = 0
+    for text in comments:  # 新しい順
+        if _is_bot_comment(text):
+            break
+        remaining = MAX_REVIEW_COMMENTS_LEN - total
+        if remaining <= 0:
+            break
+        if len(text) > remaining:
+            if selected:
+                break
+            text = text[:remaining] + "…（以降省略）"
+        selected.append(text)
+        total += len(text)
+    selected.reverse()
+    return selected
+
+
+def _previous_outcome(comments: list[str]) -> str | None:
+    """前回の自動処理の成果種別。"🤖 PR:" があれば "pr"、"🤖 完了:" だけなら "comment"。"""
+    outcome = None
+    for text in comments:
+        for line in text.splitlines():
+            if line.startswith(f"{BOT_MARK} PR:"):
+                return "pr"
+            if line.startswith(f"{BOT_MARK} 完了:"):
+                outcome = "comment"
+    return outcome
 
 
 def _truncate_comment(text: str) -> str:
     if len(text) <= MAX_COMMENT_LEN:
         return text
-    return "（先頭を省略）…\n" + text[-MAX_COMMENT_LEN:]
+    # 1 行目（🤖 印・PR URL）と末尾（起票報告）を優先して残す。
+    # 1 行目を落とすと次回実行時に自動処理コメントが人間の指示と誤認される
+    head, sep, rest = text.partition("\n")
+    notice = "\n（中略）…\n"
+    budget = MAX_COMMENT_LEN - len(head) - len(notice)
+    if not sep or budget <= 0:
+        return text[: MAX_COMMENT_LEN - 1] + "…"
+    return head + notice + rest[-budget:]
 
 
 class ProcessCardUsecase:
@@ -133,11 +191,35 @@ class ProcessCardUsecase:
             title=card.name,
             body=f"{result.summary}\n\nTrello: {card.url}",
         )
-        return f"{result.summary}\n\n🤖 PR: {url}"
+        # 1 行目に 🤖 印を置き、自動処理コメントであることを機械可読にする
+        return f"🤖 PR: {url}\n\n{result.summary}"
 
     @staticmethod
     def build_message(card: Card) -> str:
-        return f"タイトル: {card.name}\nURL: {card.url}\n\n本文:\n{card.desc}"
+        message = f"タイトル: {card.name}\nURL: {card.url}\n\n本文:\n{card.desc}"
+        comments = card.fetch_comments()
+        human = _select_human_comments(comments)
+        if human:
+            message += (
+                "\n\nレビューコメント（人間からの追加指示。必ず対応すること）:\n"
+                + "\n".join(f"- {c}" for c in human)
+            )
+        outcome = _previous_outcome(comments)
+        if outcome == "pr":
+            message += (
+                "\n\nこのカードは一度自動処理され、PR 作成後に人間のレビューで差し戻されました。"
+                "前回の成果は現在のブランチにコミット済みです。"
+                "前回と同じ作業をやり直すのではなく、前回の成果を前提に"
+                "レビューコメントの指示へ対応してください。"
+                "変更はコミットせず作業ツリーに残してください（コミットと PR 更新は自動で行われます）。"
+            )
+        elif outcome == "comment":
+            message += (
+                "\n\nこのカードは一度自動処理され（前回はコメント報告のみで、コミットはありません）、"
+                "人間のレビューで差し戻されました。"
+                "前回の報告を踏まえて、レビューコメントの指示へ対応してください。"
+            )
+        return message
 
     def resolve_project(self, card: Card) -> Project:
         """タイトルのタグを対応表で引く。決定的で、LLM には推測させない。

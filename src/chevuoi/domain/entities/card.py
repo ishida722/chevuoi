@@ -43,6 +43,14 @@ class Card(ABC):
     @abstractmethod
     def move_to_review(self) -> None: ...
 
+    def fetch_comments(self) -> list[str]:
+        """カードのコメント本文を新しい順に返す。
+
+        人間がレビューで書いた差し戻し指示の読み取りに使う。
+        コメントを持たないカード実装は空リストのままでよい。
+        """
+        return []
+
     @property
     def project_tag(self) -> ProjectTag | None:
         """タイトル先頭のタグ（例: "MIRAI ログイン修正" → MIRAI）。無ければ None。"""

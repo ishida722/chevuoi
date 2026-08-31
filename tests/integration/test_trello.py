@@ -72,6 +72,14 @@ class MockTrello:
         if path == "/1/cards/abc123" and request.method == "PUT":
             self.card_list_id = _form(request)["idList"]
             return httpx.Response(200, json={})
+        if path == "/1/cards/abc123/actions" and request.method == "GET":
+            return httpx.Response(
+                200,
+                json=[
+                    {"type": "commentCard", "data": {"text": "新しいコメント"}},
+                    {"type": "commentCard", "data": {"text": "古いコメント"}},
+                ],
+            )
         if path == "/1/cards/abc123/actions/comments":
             return httpx.Response(200, json={})
         return httpx.Response(404)
@@ -122,6 +130,13 @@ class TestTrelloCard:
         assert server.card_list_id == "review"
         comment_reqs = [r for r in server.requests if "comments" in r.url.path]
         assert comment_reqs and _form(comment_reqs[0])["text"] == "done"
+
+    def test_fetch_comments_returns_texts_newest_first(self):
+        server = MockTrello()
+        card = make_provider(server).fetch_ready_cards()[0]
+        assert card.fetch_comments() == ["新しいコメント", "古いコメント"]
+        action_reqs = [r for r in server.requests if r.url.path == "/1/cards/abc123/actions"]
+        assert action_reqs and dict(parse_qsl(action_reqs[0].url.query.decode()))["filter"] == "commentCard"
 
 
 def make_issuer(server: MockTrello, inbox: str | None = "inbox") -> TrelloCardIssuer:
