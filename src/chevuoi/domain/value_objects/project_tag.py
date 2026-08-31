@@ -15,15 +15,13 @@ class ProjectTag(BaseModel):
 
     @classmethod
     def from_title(cls, title: str) -> ProjectTag | None:
-        """タイトル先頭のタグを取り出す。最初のスペースまでをタグとする。無ければ None。
+        """タイトル先頭のタグを取り出す。最初の空白までをタグとする。無ければ None。
 
         運用は「未来リサーチ テストを実施する」のようにスペース区切りで
-        先頭の1語をタグとする。
+        先頭の1語をタグとする。区切りは半角スペースに限らず、全角スペース
+        （U+3000）やタブなど Unicode の空白文字全般を受け付ける。
         """
-        head, sep, _ = title.partition(" ")
-        if not sep:
+        parts = title.split(maxsplit=1)
+        if len(parts) < 2:
             return None
-        tag = head.strip()
-        if not tag:
-            return None
-        return cls(value=tag)
+        return cls(value=parts[0])
