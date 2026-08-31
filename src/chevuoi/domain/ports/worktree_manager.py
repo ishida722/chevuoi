@@ -26,5 +26,6 @@ class WorktreeManager(ABC):
 
     @abstractmethod
     def has_changes(self, worktree: Worktree) -> bool:
-        """未コミットの変更（追跡外ファイル含む）があるか。決定的な事実で、
-        ワークフローの自己申告には依らない。"""
+        """成果となる変更があるか。未コミットの変更（追跡外ファイル含む）に加え、
+        ベース（upstream があれば upstream）との差分＝コミット済みの成果も含む。
+        決定的な事実で、ワークフローの自己申告には依らない。"""
