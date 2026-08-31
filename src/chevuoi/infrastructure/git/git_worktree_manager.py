@@ -86,7 +86,48 @@ class GitWorktreeManager(WorktreeManager):
         result = self._git(worktree.path, "status", "--porcelain", check=False)
         if result.returncode != 0:
             raise WorktreeError(result.stderr.strip())
-        return result.stdout.strip() != ""
+        if result.stdout.strip() != "":
+            return True
+        # ワークフローが自分でコミット（さらに push）してしまった場合、作業ツリーは
+        # 綺麗でも成果は残っている。ベースブランチとの差分も成果として扱う。
+        base = self._base_ref(worktree)
+        if base is None:
+            # 判定できないことを黙って「変更なし」にすると成果を捨てるため、エラーにする
+            raise WorktreeError("ベースブランチを解決できませんでした")
+        # 三点表記で分岐点からの差分だけを数える。ベースブランチ側が進んでいても
+        # 「変更あり」と誤判定しないため。
+        count = self._git(
+            worktree.path, "rev-list", "--count", "--right-only", f"{base}...HEAD",
+            check=False,
+        )
+        if count.returncode != 0:
+            raise WorktreeError(count.stderr.strip())
+        return count.stdout.strip() not in ("", "0")
+
+    def _base_ref(self, worktree: Worktree) -> str | None:
+        """差分を測る基準のベースブランチ。解決できた最初の候補を返す。
+
+        upstream（origin/<自ブランチ>）は基準にしない。ワークフローが自分で push
+        すると差分ゼロになり、成果を取りこぼすため。
+        """
+        candidates: list[str] = []
+        origin_head = self._git(
+            worktree.path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False
+        )
+        if origin_head.returncode == 0 and origin_head.stdout.strip():
+            candidates.append(origin_head.stdout.strip())
+        # リモートが無いリポジトリでは、本体側がチェックアウトしているブランチを基準にする
+        head = self._git(worktree.repo_path, "rev-parse", "--abbrev-ref", "HEAD", check=False)
+        if head.returncode == 0 and head.stdout.strip() not in ("", "HEAD"):
+            candidates.append(head.stdout.strip())
+        for ref in candidates:
+            verified = self._git(
+                worktree.path, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+                check=False,
+            )
+            if verified.returncode == 0:
+                return ref
+        return None
 
     def _resolve_repo(self, worktree_path: Path) -> Path | None:
         result = self._git(worktree_path, "rev-parse", "--path-format=absolute",
