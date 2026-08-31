@@ -43,11 +43,13 @@ class FakeCard(Card):
         claimable: bool = True,
         external_id: str = "x1",
         generation: int = 0,
+        existing_comments: list[str] | None = None,
     ) -> None:
         self._name = name
         self._claimable = claimable
         self._external_id = external_id
         self._generation = generation
+        self._existing_comments = list(existing_comments or [])
         self.comments: list[str] = []
         self.moved_to_review = False
 
@@ -72,6 +74,9 @@ class FakeCard(Card):
 
     def add_comment(self, text: str) -> None:
         self.comments.append(text)
+
+    def fetch_comments(self) -> list[str]:
+        return list(self._existing_comments)
 
     def move_to_review(self) -> None:
         self.moved_to_review = True

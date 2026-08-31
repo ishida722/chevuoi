@@ -102,6 +102,14 @@ class TrelloCard(Card):
     def add_comment(self, text: str) -> None:
         self._client.post(f"/cards/{self._card_id}/actions/comments", {"text": text})
 
+    def fetch_comments(self) -> list[str]:
+        # Trello の actions は新しい順で返る。既定の 50 件窓で古いコメントを
+        # 見落とさないよう、API 上限の 1000 件まで取る
+        actions = self._client.get(
+            f"/cards/{self._card_id}/actions", {"filter": "commentCard", "limit": 1000}
+        )
+        return [a["data"]["text"] for a in actions]
+
     def move_to_review(self) -> None:
         self._client.put(
             f"/cards/{self._card_id}", {"idList": self._config.in_review_list_id}

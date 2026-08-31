@@ -102,7 +102,7 @@ class TestProcessCardUsecase:
         assert "MIRAI ログイン修正" in executor.calls[0]["message"]
         assert publisher.calls[0]["title"] == "MIRAI ログイン修正"
         assert "やった" in publisher.calls[0]["body"] and card.url in publisher.calls[0]["body"]
-        assert card.comments == ["やった\n\n🤖 PR: https://x/pr/1"]
+        assert card.comments == ["🤖 PR: https://x/pr/1\n\nやった"]
         assert card.moved_to_review
 
     def test_pr_outcome_without_changes_comments_no_change(self):
@@ -187,6 +187,110 @@ class TestProcessCardUsecase:
         assert project.test_commands == ["uv run pytest -q"]
 
 
+class TestBuildMessage:
+    def test_without_comments_is_title_url_desc_only(self):
+        message = ProcessCardUsecase.build_message(FakeCard("MIRAI 修正"))
+        assert "レビューコメント（人間からの追加指示" not in message
+        assert "差し戻され" not in message
+
+    def test_human_comments_appear_oldest_first(self):
+        card = FakeCard("MIRAI 修正", existing_comments=["新しい指示", "古い指示"])
+        message = ProcessCardUsecase.build_message(card)
+        assert "レビューコメント" in message
+        assert message.index("古い指示") < message.index("新しい指示")
+
+    def test_bot_comments_are_excluded(self):
+        card = FakeCard(
+            "MIRAI 修正",
+            existing_comments=["🤖 変更なし:\nやった", "🤖 PR: https://x/pr/1\n\nやった"],
+        )
+        message = ProcessCardUsecase.build_message(card)
+        assert "レビューコメント（人間からの追加指示" not in message
+
+    def test_legacy_pr_comment_is_excluded(self):
+        # 旧形式（summary の後に 🤖 PR: 行）も自動処理コメントとして扱う
+        card = FakeCard("MIRAI 修正", existing_comments=["やった\n\n🤖 PR: https://x/pr/1"])
+        message = ProcessCardUsecase.build_message(card)
+        assert "レビューコメント（人間からの追加指示" not in message
+        assert "差し戻され" in message
+
+    def test_human_comment_quoting_bot_line_is_kept(self):
+        card = FakeCard(
+            "MIRAI 修正",
+            existing_comments=["この部分を直して:\n🤖 完了:\n調査した", "🤖 完了:\n調査した"],
+        )
+        message = ProcessCardUsecase.build_message(card)
+        assert "この部分を直して" in message
+
+    def test_pr_comment_marks_resubmission(self):
+        card = FakeCard(
+            "MIRAI 修正",
+            existing_comments=["テストも足して", "🤖 PR: https://x/pr/1\n\nやった"],
+        )
+        message = ProcessCardUsecase.build_message(card)
+        assert "テストも足して" in message
+        assert "差し戻され" in message and "コミットせず" in message
+
+    def test_resubmission_context_added_even_without_human_comments(self):
+        card = FakeCard("MIRAI 修正", existing_comments=["🤖 PR: https://x/pr/1\n\nやった"])
+        message = ProcessCardUsecase.build_message(card)
+        assert "差し戻され" in message
+
+    def test_instructions_older_than_last_bot_comment_are_not_resent(self):
+        card = FakeCard(
+            "MIRAI 修正",
+            existing_comments=[
+                "今回の指示",
+                "🤖 PR: https://x/pr/1\n\nやった",
+                "対応済みの古い指示",
+            ],
+        )
+        message = ProcessCardUsecase.build_message(card)
+        assert "今回の指示" in message
+        assert "対応済みの古い指示" not in message
+
+    def test_done_comment_marks_resubmission(self):
+        card = FakeCard("MIRAI 修正", existing_comments=["続きをやって", "🤖 完了:\n調査した"])
+        message = ProcessCardUsecase.build_message(card)
+        assert "差し戻され" in message
+
+    def test_human_comment_without_bot_history_adds_no_resubmission_context(self):
+        card = FakeCard("MIRAI 修正", existing_comments=["補足です"])
+        message = ProcessCardUsecase.build_message(card)
+        assert "補足です" in message
+        assert "差し戻され" not in message
+
+    def test_comments_are_trimmed_newest_first(self):
+        old = "古" * 6000
+        new = "新" * 6000
+        card = FakeCard("MIRAI 修正", existing_comments=[new, old])
+        message = ProcessCardUsecase.build_message(card)
+        assert new in message
+        assert old not in message
+
+    def test_truncated_bot_comment_is_still_excluded(self):
+        # カードコメントの切り詰め（_truncate_comment）を経ても 1 行目の 🤖 印と
+        # PR URL が残り、次回の build_message で人間の指示と誤認されないこと
+        from chevuoi.application.usecases.process_card_usecase import _truncate_comment
+
+        long_comment = _truncate_comment("🤖 PR: https://x/pr/1\n\n" + "や" * 20000)
+        assert long_comment.startswith("🤖 PR: https://x/pr/1")
+        assert len(long_comment) <= 16000 + 100
+        card = FakeCard("MIRAI 修正", existing_comments=[long_comment])
+        message = ProcessCardUsecase.build_message(card)
+        assert "レビューコメント（人間からの追加指示" not in message
+        assert "差し戻され" in message
+
+    def test_executor_receives_review_comments(self):
+        usecase, _, executor, _ = make_usecase()
+        card = FakeCard(
+            "MIRAI 修正",
+            existing_comments=["ここを直して", "🤖 PR: https://x/pr/1\n\nやった"],
+        )
+        usecase.execute(card)
+        assert "ここを直して" in executor.calls[0]["message"]
+
+
 class TestProcessCardProposals:
     def test_issued_url_is_appended_to_comment(self):
         issuer = FakeCardIssuer()
@@ -197,7 +301,7 @@ class TestProcessCardProposals:
         assert req.title == "flaky test" and req.project_tag.value == "MIRAI"
         assert req.parent == card.id and req.generation == 1 and req.parent_url == card.url
         comment = card.comments[0]
-        assert comment.startswith("やった\n\n🤖 PR: https://x/pr/1")
+        assert comment.startswith("🤖 PR: https://x/pr/1\n\nやった")
         assert comment.endswith("🤖 起票:\n- 新規: https://example.com/new1")
         assert card.moved_to_review
 
@@ -257,7 +361,7 @@ class TestProcessCardProposals:
         usecase, _, _, _ = make_usecase()
         card = FakeCard("MIRAI x")
         usecase.execute(card)
-        assert card.comments == ["やった\n\n🤖 PR: https://x/pr/1"]
+        assert card.comments == ["🤖 PR: https://x/pr/1\n\nやった"]
 
     def test_evidence_goes_into_body_and_key_is_deterministic(self):
         issuer = FakeCardIssuer()
