@@ -17,11 +17,19 @@ class TestProjectTag:
             value="未来リサーチ"
         )
 
+    def test_extracts_tag_from_fullwidth_space_title(self):
+        assert ProjectTag.from_title(
+            "未来リサーチ　後処理MAのデザインドックとADR"
+        ) == ProjectTag(value="未来リサーチ")
+
     def test_no_delimiter_returns_none(self):
         assert ProjectTag.from_title("ログイン修正") is None
 
     def test_empty_tag_returns_none(self):
         assert ProjectTag.from_title(" ログイン修正") is None
+
+    def test_fullwidth_space_only_prefix_returns_none(self):
+        assert ProjectTag.from_title("　ログイン修正") is None
 
 
 class TestBranchName:
