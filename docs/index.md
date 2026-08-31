@@ -30,5 +30,6 @@ design/mvp
 design/workflow-engine
 design/execution-log
 design/20260829-card-issuing/design
+design/20260829-runner-model-and-light-router/design
 design/20260830-pr-review-workflow/design
 ```
