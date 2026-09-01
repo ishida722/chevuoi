@@ -34,7 +34,10 @@ class ClaudeCliRunner(Runner):
         allowed_tools: Sequence[str] | None = None,
         model: str | None = None,
     ) -> list[str]:
-        cmd = ["claude", "-p", prompt, "--output-format", "json"]
+        # --permission-mode auto: 非対話（-p）では承認を求める先が無く、既定のままだと
+        # Write / Edit と書き込みを伴う Bash がその場で拒否される。信頼ダイアログは -p で
+        # スキップされるため、効いているのはツール承認のほう。
+        cmd = ["claude", "-p", prompt, "--output-format", "json", "--permission-mode", "auto"]
         if session_id is not None:
             cmd += ["--resume", session_id]
         if allowed_tools is not None:
