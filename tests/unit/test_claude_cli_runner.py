@@ -26,7 +26,14 @@ class TestBuildCommand:
     def test_basic(self, runner):
         assert runner.build_command("やる", None) == [
             "claude", "-p", "やる", "--output-format", "json",
+            "--permission-mode", "auto",
         ]
+
+    def test_permission_mode_is_always_passed(self):
+        # 非対話では承認を求める先が無いため、常に付ける（付けないと書き込みが拒否される）
+        runner = ClaudeCliRunner(make_config(node_timeout_sec=42))
+        cmd = runner.build_command("やる", "sess-1", model="haiku")
+        assert cmd[cmd.index("--permission-mode") + 1] == "auto"
 
     def test_resume(self, runner):
         cmd = runner.build_command("続き", "sess-1")
