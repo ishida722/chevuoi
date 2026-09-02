@@ -55,14 +55,23 @@ class Runner(ABC):
         session_id: str | None = None,
         allowed_tools: Sequence[str] | None = None,
         model: str | None = None,
+        permission_mode: str | None = None,
     ) -> RunResult:
         """prompt を実行して結果を返す。
 
         cwd: 作業ディレクトリ（None ならホストのカレント）。
         session_id: 前回の RunResult.session_id を渡すと文脈を継続する。
-        allowed_tools: 許可するツール名（None なら Claude Code の既定）。
+        allowed_tools: 許可するツール名（None なら Claude Code の既定）。ツールの事前承認で
+                       あって制限ではないので、これだけでは書き込みを防げない。
         model: 使用するモデル。Claude Code のエイリアス（"haiku" / "sonnet" 等）または
                完全名。None または空文字列なら Claude Code の既定に従う。
+        permission_mode: Claude Code の権限モード（例: "auto"）。None または空文字列なら
+                         既定のままで、非対話（-p）では書き込みを伴うツールが拒否される。
+                         その呼び出しが変更を加えることを意図しているかで決める:
+                         ファイル編集やコマンド実行をさせるノードは "auto" を渡し、
+                         分類・レビューなど読むだけの呼び出しには渡さない。session_id で
+                         継続した先も同じ判断をする（継続元が読み取りでも、書き込ませる
+                         呼び出しでは渡す必要がある）。
         """
 
 
