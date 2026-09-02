@@ -132,6 +132,7 @@ class ProcessCardUsecase:
                     f"設定済みタグ: {', '.join(self.config.projects) or '(なし)'}"
                 )
             )
+            logger.info("終端: needs_human (プロジェクト未特定) (%s)", card.name)
             card.move_to_review()
             logger.info("In review へ移動: %s", card.name)
             return
@@ -149,7 +150,9 @@ class ProcessCardUsecase:
                         f"理由: {decision.reason}"
                     )
                 )
+                logger.info("終端: needs_human (ワークフロー未決定) (%s)", card.name)
                 card.move_to_review()
+                logger.info("In review へ移動: %s", card.name)
                 return
 
             worktree = self.worktrees.create(project, card)
@@ -180,17 +183,22 @@ class ProcessCardUsecase:
         self, card: Card, outcome: str, worktree: Worktree, result: ExecutionResult
     ) -> str:
         """終端処理。戻り値はカードに残すコメント。"""
+        # 終端種別をログにも残す。ログ単体で成果の有無を追えるようにする
         if result.blocked:
+            logger.info("終端: blocked (%s)", card.name)
             return f"🤖 blocked: {result.blocked}\n\nworktree: {worktree.path}"
         if outcome == "comment":
+            logger.info("終端: コメント報告 (%s)", card.name)
             return f"🤖 完了:\n{result.summary}"
         if not self.worktrees.has_changes(worktree):
+            logger.info("終端: 変更なし (%s)", card.name)
             return f"🤖 変更なし:\n{result.summary}"
         url = self.publisher.publish(
             worktree,
             title=card.name,
             body=f"{result.summary}\n\nTrello: {card.url}",
         )
+        logger.info("終端: PR (%s) %s", card.name, url)
         # 1 行目に 🤖 印を置き、自動処理コメントであることを機械可読にする
         return f"🤖 PR: {url}\n\n{result.summary}"
 
