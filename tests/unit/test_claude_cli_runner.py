@@ -26,14 +26,18 @@ class TestBuildCommand:
     def test_basic(self, runner):
         assert runner.build_command("やる", None) == [
             "claude", "-p", "やる", "--output-format", "json",
-            "--permission-mode", "auto",
         ]
 
-    def test_permission_mode_is_always_passed(self):
-        # 非対話では承認を求める先が無いため、常に付ける（付けないと書き込みが拒否される）
-        runner = ClaudeCliRunner(make_config(node_timeout_sec=42))
-        cmd = runner.build_command("やる", "sess-1", model="haiku")
+    def test_permission_mode_is_opt_in(self, runner):
+        # 既定では付けない（信頼できない入力を読むだけの呼び出しで書き込みを通さない）
+        assert "--permission-mode" not in runner.build_command("やる", "sess-1", model="haiku")
+
+    def test_permission_mode_is_passed_when_given(self, runner):
+        cmd = runner.build_command("やる", None, permission_mode="auto")
         assert cmd[cmd.index("--permission-mode") + 1] == "auto"
+
+    def test_empty_permission_mode_omits_option(self, runner):
+        assert "--permission-mode" not in runner.build_command("やる", None, permission_mode="")
 
     def test_resume(self, runner):
         cmd = runner.build_command("続き", "sess-1")
@@ -64,6 +68,19 @@ class TestRun:
         with patch("subprocess.run", return_value=completed(payload)) as m:
             runner.run("やる", model="haiku")
         assert m.call_args.args[0][-2:] == ["--model", "haiku"]
+
+    def test_run_passes_permission_mode_to_command(self, runner):
+        payload = json.dumps({"result": "done", "session_id": "s1", "is_error": False})
+        with patch("subprocess.run", return_value=completed(payload)) as m:
+            runner.run("やる", permission_mode="auto")
+        cmd = m.call_args.args[0]
+        assert cmd[cmd.index("--permission-mode") + 1] == "auto"
+
+    def test_run_omits_permission_mode_by_default(self, runner):
+        payload = json.dumps({"result": "done", "session_id": "s1", "is_error": False})
+        with patch("subprocess.run", return_value=completed(payload)) as m:
+            runner.run("やる")
+        assert "--permission-mode" not in m.call_args.args[0]
 
     def test_is_error_flag(self, runner):
         payload = json.dumps({"result": "だめ", "session_id": "s1", "is_error": True})

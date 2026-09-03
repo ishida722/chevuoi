@@ -56,6 +56,16 @@ Python 3.12 以上と [uv](https://docs.astral.sh/uv/) が必要です。
 uv sync
 ```
 
+実行ノードには Claude Code CLI（`claude`）を使います。ファイルを編集するワークフローは
+`--permission-mode auto` を使うため、この値を受け付けるバージョンが必要です（動作確認済み: 2.1.252）。
+`auto` を知らない古い CLI では引数解析の時点で失敗し、このオプションを使う実行だけが `ok=False`
+になります（ルーターなど渡さない実行は成功するので、ワークフローの実装ノードだけが落ちる形で
+現れます）。次のコマンドで `auto` が選択肢にあるか確認できます。
+
+```bash
+claude --help | grep -A3 -- --permission-mode
+```
+
 設定は TOML ファイルで行います。既定のパスは `~/.config/vuoi/config.toml` で、`--config` オプションで変更できます。Trello の認証情報は、設定ファイルに無ければ環境変数 `TRELLO_KEY` / `TRELLO_TOKEN` から読み込みます。ユーザー定義ワークフローの既定の置き場所は `$XDG_CONFIG_HOME/vuoi/workflows`（未設定時は `~/.config/vuoi/workflows`）です。
 
 ## 使い方

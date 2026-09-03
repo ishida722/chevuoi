@@ -32,8 +32,14 @@ class ScriptedRunner(Runner):
     def __init__(self, output: str, ok: bool = True) -> None:
         self.output, self.ok, self.calls = output, ok, []
 
-    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None, model=None):
-        self.calls.append({"prompt": prompt, "allowed_tools": allowed_tools, "model": model})
+    def run(
+        self, prompt, *, cwd=None, session_id=None, allowed_tools=None, model=None,
+        permission_mode=None,
+    ):
+        self.calls.append({
+            "prompt": prompt, "allowed_tools": allowed_tools, "model": model,
+            "permission_mode": permission_mode,
+        })
         return RunResult(ok=self.ok, output=self.output)
 
 
@@ -52,6 +58,11 @@ class TestClaudeWorkflowRouter:
         assert d.workflow == "research" and d.confidence == "high"
         assert runner.calls[0]["allowed_tools"] == ("Read", "Grep", "Glob")
         assert "when_to_use: 調査・報告書" in runner.calls[0]["prompt"]
+
+    def test_permission_mode_is_not_passed(self):
+        # 分類フェーズは信頼できないカード本文をプロンプトに含むので、書き込みを通さない
+        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}')
+        assert runner.calls[0]["permission_mode"] is None
 
     def test_model_from_config_is_passed(self):
         _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}', model="haiku")

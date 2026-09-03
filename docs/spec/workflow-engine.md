@@ -168,7 +168,8 @@ class Runner(ABC):
     def run(self, prompt: str, *, cwd: Path | None = None,
             session_id: str | None = None,
             allowed_tools: Sequence[str] | None = None,
-            model: str | None = None) -> RunResult: ...
+            model: str | None = None,
+            permission_mode: str | None = None) -> RunResult: ...
 
 
 @dataclass(frozen=True)
@@ -218,7 +219,11 @@ __all__ = ["API_VERSION", "PROPOSAL_PROMPT", "BaseState", "ProjectInfo", "Propos
 
 `WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
 
-- **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う。`model` に Claude Code のエイリアス（`"haiku"` / `"sonnet"` 等）または完全名（例: `"claude-haiku-4-5-20251001"`）を渡すと、その呼び出しだけモデルを切り替えられる（`None` なら Claude Code の既定）。分類は軽く・実装は重く、といった使い分けをノード単位でできる。`Runner` を自前実装する場合もこの引数を受け取ること
+```{note}
+`permission_mode` の導入前は、ホストが `--permission-mode auto` を全実行に付けていました。既存のワークフローは**書き込むノードに `permission_mode="auto"` を足す**必要があります。渡さないまま実行すると、ツールが拒否されても Claude Code 自体は正常終了するため、`RunResult.ok` は真のまま成果だけが空になります。
+```
+
+- **`runner`**: ノードの主作業（ツールを使うエージェント実行）に使う。前回の `RunResult.session_id` を `session_id` に渡すと文脈を継続できる。タイムアウト・ログ・コスト記録はホスト側の実装が担う。`model` に Claude Code のエイリアス（`"haiku"` / `"sonnet"` 等）または完全名（例: `"claude-haiku-4-5-20251001"`）を渡すと、その呼び出しだけモデルを切り替えられる（`None` なら Claude Code の既定）。分類は軽く・実装は重く、といった使い分けをノード単位でできる。`permission_mode` に `"auto"` を渡すと、その呼び出しだけ Claude Code の権限モードを切り替えられる（`None` なら既定）。非対話実行では既定のまま Write / Edit と書き込みを伴う Bash が拒否されるので、**ファイルを編集したりコマンドを実行したりするノードは `permission_mode="auto"` を明示的に渡す**。判断の基準はプロンプトの中身ではなく「その呼び出しに変更させるつもりがあるか」で、分類・レビューのように読むだけの呼び出しには渡さない（`session_id` で継続した先も同じ基準で判断する）。`allowed_tools` はツールの**事前承認**であって制限ではないため、読み取り系だけを渡しても `"auto"` と組み合わせれば書き込みは防げない。渡さなかった場合も、ホスト側に蓄積された Claude Code の `permissions.allow` によっては個別のツールが承認済みでありうるので、既定は「一括承認をしない」であって隔離ではない。`Runner` を自前実装する場合もこれらの引数を受け取ること（ホストは将来も新しいキーワード引数を足しうる）
 - **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
 - **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
 - **`project`**: 対象プロジェクトの情報。`vuoi run` ではカードのタグで解決したプロジェクト、`vuoi workflow run` など対象が無い実行では `None`。**ゲートの中身（`test_commands`）はプロジェクトが持ち、ゲートを置くか・何回試すかはワークフローが決める**（{doc}`routes`）。ゲート有りのワークフローは未設定時に通過扱いにせず `blocked` で止める
@@ -275,6 +280,7 @@ def build(ctx: WorkflowContext) -> StateGraph:
         r = ctx.runner.run(
             "テストを通す実装をして\n\n" + PROPOSAL_PROMPT,   # 範囲外の問題は直さず報告させる
             cwd=ctx.workdir, session_id=state.get("session_id"),
+            permission_mode="auto",   # 変更させるノードだけがオプトインする
         )
         if not r.ok:
             ctx.logger.error("実行失敗: %s", r.output)

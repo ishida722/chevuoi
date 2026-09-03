@@ -326,7 +326,7 @@ claim → project 解決（決定的） → SelectWorkflowUsecase
 
 ## ルーター（カード → ワークフロー）
 
-`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` と `model=config.router.model`（`[router] model`。未設定なら `None` で Claude Code の既定）で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
+`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` と `model=config.router.model`（`[router] model`。未設定なら `None` で Claude Code の既定）で呼び、`permission_mode` は渡さない（プロンプトに信頼できないカード本文が入り `cwd` がリポジトリ／worktree なので、分類フェーズで書き込みを一括承認する理由がない。`allowed_tools` は事前承認であって制限ではなく、読み取り系に絞っても `"auto"` と組み合わせれば書き込みは通る。ただしこれは一括承認をやめるだけで隔離ではなく、ホストに蓄積された `permissions.allow` があれば既定モードでも個別ツールは承認済みでありうる）、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
 
 ## テスト戦略
 

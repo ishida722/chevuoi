@@ -91,6 +91,13 @@ class ClaudeWorkflowRouter(WorkflowRouter):
     ) -> RoutingDecision:
         if not candidates:
             return RoutingDecision(workflow=None, reason="候補ワークフローがありません")
+        # permission_mode は渡さない（既定のまま）。プロンプトには信頼できないカードの
+        # タイトル・本文がそのまま入り、cwd はリポジトリ／worktree なので、分類フェーズに
+        # 書き込みを一括承認する理由はない。--allowedTools は事前承認であって制限ではなく、
+        # 読み取り系に絞っても "auto" と組み合わせれば書き込みは通ってしまう。
+        # ただしこれは一括承認をやめるだけで、隔離ではない: ホストの
+        # ~/.claude/settings.json に permissions.allow が積まれていれば、既定モードでも
+        # 個別のツールは承認済みでありうる（本当の禁止には拒否リストの類が要る）。
         result = self._runner.run(
             self.build_prompt(card, candidates),
             cwd=cwd,
