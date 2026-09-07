@@ -1,0 +1,31 @@
+=== 期間 ===
+2026-09-01 17:39:44
+2026-09-07 10:58:41
+
+=== 層別の件数 ===
+第1層(決定的マーカー): 0
+第2層(LLM)          : 106
+
+=== 棄権（confidence=low もしくは workflow=None） ===
+2026-09-07 10:42:12,609 INFO chevuoi.application.usecases.select_workflow_usecase: ルーティング(LLM): vuoi トリアージ機能の設計 -> None (confidence=low) ルーター実行失敗: You've reached your Fable limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue.
+2026-09-07 10:42:13,731 INFO chevuoi.application.usecases.select_workflow_usecase: ルーティング(LLM): 未来リサーチ 今までの実験まとめ -> None (confidence=low) ルーター実行失敗: You've reached your Fable limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue.
+
+=== 選択されたワークフローの分布 ===
+     61 -> dev (confidence
+     21 -> doc (confidence
+     12 -> research (confidence
+      4 -> task (confidence
+      4 -> academic_writing (confidence
+      2 -> design (confidence
+      2 -> None (confidence
+
+=== 理由がカード本文の自己申告を根拠にしている件数 ===
+20 / 106
+
+=== 同一タイトルで判定が割れたカード ===
+未来リサーチ 今までの実験まとめ => None research 
+vuoi トリアージ機能の設計 => None design 
+texts ループエンジニアリング記事構成作成 => academic_writing doc 
+
+=== claude 実行時のモデル指定 ===
+    438 model=None
