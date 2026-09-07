@@ -4,19 +4,30 @@ from injector import inject
 
 from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
 from chevuoi.domain.entities.workflow_meta import WorkflowMeta
+from chevuoi.infrastructure.config.settings import AppConfig
+
+
+def format_router_model(config: AppConfig) -> str:
+    """ルーターの実行モデルの表示文字列。未指定なら既定モデルであることを明記する。"""
+    return config.router.model or "未指定（Claude Code の既定モデル）"
 
 
 class WorkflowReportUsecase:
     """スキャン結果を仕様 §9 の書式で整形する。コードは一切実行しない。"""
 
     @inject
-    def __init__(self, registry: WorkflowRegistry) -> None:
+    def __init__(self, registry: WorkflowRegistry, config: AppConfig) -> None:
         self._registry = registry
+        self._config = config
 
     def execute(self) -> str:
         result = self._registry.scan()
         metas = self._registry.list(include_disabled=True)
-        lines: list[str] = [f"✓ ワークフロー {len(metas)} 件"]
+        # 設定漏れに気づけるよう、ルーターが実際に使うモデルを先頭に出す
+        lines: list[str] = [
+            f"✓ ルーターモデル {format_router_model(self._config)}",
+            f"✓ ワークフロー {len(metas)} 件",
+        ]
         for meta in metas:
             lines.extend(self._format_meta(meta))
         if result.invalid:

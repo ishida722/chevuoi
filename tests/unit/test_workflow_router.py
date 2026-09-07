@@ -12,7 +12,7 @@ from chevuoi.domain.ports.workflow_loader import WorkflowLoader
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
 from chevuoi.infrastructure.workflows.claude_workflow_router import ClaudeWorkflowRouter
-from chevuoi.infrastructure.config.settings import RouterConfig
+from chevuoi.infrastructure.config.settings import DEFAULT_ROUTER_MODEL, RouterConfig
 from chevuoi.interfaces.cli.adhoc_card import AdhocCard
 from tests.unit.fakes import make_config
 
@@ -54,11 +54,18 @@ class TestClaudeWorkflowRouter:
         assert "when_to_use: 調査・報告書" in runner.calls[0]["prompt"]
 
     def test_model_from_config_is_passed(self):
-        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}', model="haiku")
-        assert runner.calls[0]["model"] == "haiku"
+        # 既定値と区別できるよう、あえて軽量モデル以外を指定する
+        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}', model="sonnet")
+        assert runner.calls[0]["model"] == "sonnet"
 
-    def test_model_unset_passes_none(self):
+    def test_model_defaults_to_light_model(self):
+        # [router] を書かなくても軽量モデルで動く（既定モデルへのフォールバックはしない）
         _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}')
+        assert runner.calls[0]["model"] == DEFAULT_ROUTER_MODEL
+
+    def test_empty_model_passes_none(self):
+        # model = "" は「指定しない」＝ Claude Code の既定モデル
+        _, runner = self.route('{"workflow": "dev", "confidence": "high", "reason": "r"}', model="")
         assert runner.calls[0]["model"] is None
 
     def test_prompt_excludes_feasibility_from_confidence(self):

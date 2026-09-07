@@ -83,7 +83,7 @@ def test_inbox_list_id_and_proposals_default(tmp_path, monkeypatch):
     assert config.trello.inbox_list_id is None
     assert config.proposals.max_per_run == 3
     assert config.proposals.max_generation == 2
-    assert config.router.model is None
+    assert config.router.model == "haiku"  # [router] 省略時は軽量モデルの既定値
 
 
 def test_inbox_list_id_and_proposals_from_toml(tmp_path, monkeypatch):

@@ -279,8 +279,10 @@ class LlmConfig(BaseModel):
     model: str                          # 例: "claude-sonnet-5"
     # 認証はプロバイダ既定の環境変数に委ねる
 
+DEFAULT_ROUTER_MODEL = "haiku"          # ルーターは分類だけなので軽量モデルを既定にする
+
 class RouterConfig(BaseModel):
-    model: str | None = None            # 例: "haiku"。None なら Claude Code の既定
+    model: str = DEFAULT_ROUTER_MODEL   # "" にすると --model を付けず Claude Code の既定
 
 class AppConfig(BaseModel):
     ...  # 既存フィールド
@@ -326,7 +328,7 @@ claim → project 解決（決定的） → SelectWorkflowUsecase
 
 ## ルーター（カード → ワークフロー）
 
-`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` と `model=config.router.model`（`[router] model`。未設定なら `None` で Claude Code の既定）で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
+`WorkflowRouter` ポート（ドメイン）と `ClaudeWorkflowRouter`（インフラ）。実装は `Runner` を `allowed_tools=("Read","Grep","Glob")` と `model=config.router.model`（`[router] model`。未設定なら軽量モデルの既定値 `haiku`、空文字列なら `None` で Claude Code の既定）で呼び、JSON（`workflow` / `confidence` / `reason`）を取り出して `RoutingDecision` にする。`confidence` は「カードがどの候補に当てはまるか」の明確さだけを表し、資料の取得可否やアクセス権・難易度といった実行可能性はプロンプトで明示的に評価対象から外す（それらは後続のワークフローの責務）。候補外の名前・解析不能・runner 失敗はすべて棄権（`workflow=None`）として返し、例外は投げない。3 層の組み立て（マーカー → LLM → 棄権判定）は `SelectWorkflowUsecase` が担い、判断はログに残す（経路 × 終端状態の混同行列を取るため）。
 
 ## テスト戦略
 
