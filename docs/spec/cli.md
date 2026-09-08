@@ -5,6 +5,8 @@
 ```bash
 vuoi run                      # 全ソースをポーリングして1巡
 vuoi run --source trello --limit 1
+vuoi review-requests          # レビュー依頼中の PR をカードとして起票
+vuoi review-requests --limit 5
 vuoi resume <run_id>          # 中断ランの再開
 vuoi status                   # 未終端ランの一覧
 vuoi gc --older-than 7d       # 終端済み worktree の掃除
@@ -14,6 +16,8 @@ vuoi workflow select <title> ["本文"]    # カード内容からワークフ�
 ```
 
 `workflow run` は最後に追加されたメッセージ本文を標準出力に出します。メッセージを増やさないワークフローの場合は、`messages` を除いた最終 state を表示します。失敗（存在しない・無効・ロード失敗）は標準エラーに理由を出して終了コード 1 で終わります。`workflow select` は選択結果・確信度・理由を表示し、棄権した場合は終了コード 2 で終わります。
+
+`review-requests` は自分にレビューが依頼されている open な PR を取得し、Inbox にカードを起票します（詳細は {doc}`task-sources` の「PR レビュー依頼の取り込み」）。起票結果を標準出力に一覧し、起票できなかった PR があれば理由を標準エラーに出して終了コード 1 で終わります。`--limit`（既定 20）で 1 回に見る PR の件数を決め、上限に達した場合は古い依頼が残っている旨を警告します。`run` と同じく定期実行を想定したコマンドです。
 
 ## 再開可能性
 

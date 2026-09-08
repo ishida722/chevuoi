@@ -10,7 +10,12 @@ import typer
 from injector import Injector
 
 from chevuoi.application.usecases.gc_usecase import GcUsecase
+from chevuoi.application.usecases.issue_review_requests_usecase import (
+    DEFAULT_LIMIT,
+    IssueReviewRequestsUsecase,
+)
 from chevuoi.application.usecases.run_usecase import RunUsecase
+from chevuoi.domain.exceptions import ChevuoiError
 from chevuoi.infrastructure.config.settings import load_config
 from chevuoi.interface.di_modules import AppModule
 from chevuoi.interfaces.cli.commands import card, workflow
@@ -71,6 +76,29 @@ def setup(
 @app.command("run", help="Trello をポーリングして1巡")
 def run(ctx: typer.Context) -> None:
     get_injector(ctx).get(RunUsecase).execute()
+
+
+@app.command("review-requests", help="レビュー依頼中の PR を Inbox にカードとして起票する")
+def review_requests(
+    ctx: typer.Context,
+    limit: Annotated[
+        int, typer.Option("--limit", help=f"取得する PR の上限（既定: {DEFAULT_LIMIT}）")
+    ] = DEFAULT_LIMIT,
+) -> None:
+    """定期実行される想定のコマンド。同じ PR のカードは冪等キーで 1 枚に収束する。"""
+    try:
+        report = get_injector(ctx).get(IssueReviewRequestsUsecase).execute(limit=limit)
+    except ChevuoiError as e:
+        print(str(e), file=sys.stderr)
+        raise typer.Exit(code=1)
+    for issued in report.issued:
+        print(f"{'発行' if issued.created else '既存'}: {issued.url}")
+    for reason in report.skipped:
+        print(reason, file=sys.stderr)
+    if report.is_empty:
+        print("レビュー依頼中の PR はありません")
+    if report.skipped:
+        raise typer.Exit(code=1)
 
 
 @app.command("gc", help="終端済み worktree の掃除")

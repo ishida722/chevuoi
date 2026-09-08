@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Literal
 
 from pydantic import BaseModel
 
 from chevuoi.domain.entities.issue_report import IssuedCard
 from chevuoi.domain.value_objects.card_id import CardId
 from chevuoi.domain.value_objects.project_tag import ProjectTag
+
+# 冪等キーを探す範囲。inbox は Inbox リストのみ、board は Inbox を含むボード全体
+# （人間が Inbox から動かしたあとの再起票を防ぐ）
+SearchScope = Literal["inbox", "board"]
 
 
 class CardIssueRequest(BaseModel):
@@ -22,6 +27,7 @@ class CardIssueRequest(BaseModel):
     generation: int = 0
     parent: CardId | None = None
     parent_url: str = ""
+    search_scope: SearchScope = "inbox"  # 同キーの既存カードを探す範囲
 
 
 class CardIssuer(ABC):
@@ -30,8 +36,8 @@ class CardIssuer(ABC):
     """
 
     @abstractmethod
-    def find_by_key(self, key: str) -> IssuedCard | None:
-        """冪等キーを本文に持つ既存カードを探す。"""
+    def find_by_key(self, key: str, *, scope: SearchScope = "inbox") -> IssuedCard | None:
+        """冪等キーを本文に持つ既存カードを探す。scope で探索範囲を選ぶ。"""
 
     @abstractmethod
     def issue(self, request: CardIssueRequest) -> IssuedCard:

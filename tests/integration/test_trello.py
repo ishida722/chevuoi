@@ -50,6 +50,7 @@ class MockTrello:
         self.card_list_id = card_list_id
         self.requests: list[httpx.Request] = []
         self.inbox: list[dict] = []
+        self.board: list[dict] = []  # Inbox から動かされたカードを含むボード全体
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -58,6 +59,10 @@ class MockTrello:
             return httpx.Response(200, json=[CARD_JSON])
         if path == "/1/lists/inbox/cards":
             return httpx.Response(200, json=self.inbox)
+        if path == "/1/lists/inbox":
+            return httpx.Response(200, json={"idBoard": "board1"})
+        if path == "/1/boards/board1/cards":
+            return httpx.Response(200, json=self.inbox + self.board)
         if path == "/1/cards" and request.method == "POST":
             form = _form(request)
             n = len(self.inbox) + 1
@@ -182,6 +187,46 @@ class TestTrelloCardIssuer:
         assert first.created and not second.created
         assert second.id == first.id
         assert len([r for r in server.requests if r.method == "POST"]) == 1
+
+    def test_issue_without_tag_has_no_leading_space(self):
+        server = MockTrello()
+        make_issuer(server).issue(make_request(project_tag=ProjectTag(value="")))
+        assert _form([r for r in server.requests if r.method == "POST"][0])["name"] == "flaky test"
+
+    def test_board_scope_reuses_a_card_moved_out_of_inbox(self):
+        server = MockTrello()
+        make_issuer(server).issue(make_request(search_scope="board"))
+        server.board = server.inbox  # 人間が Inbox から別リストへ動かした
+        server.inbox = []
+        second = make_issuer(server).issue(make_request(search_scope="board"))  # 次のラン
+        assert not second.created and second.url == "https://trello.com/c/NEW1"
+        assert len([r for r in server.requests if r.method == "POST"]) == 1
+
+    def test_board_scope_lists_the_board_once_per_run(self):
+        server = MockTrello()
+        issuer = make_issuer(server)
+        for key in ("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"):
+            issuer.issue(make_request(idempotency_key=key, search_scope="board"))
+        listings = [r for r in server.requests if r.url.path == "/1/boards/board1/cards"]
+        assert len(listings) == 1
+        assert len([r for r in server.requests if r.method == "POST"]) == 3
+
+    def test_board_scope_sees_cards_issued_earlier_in_the_same_run(self):
+        server = MockTrello()
+        issuer = make_issuer(server)
+        first = issuer.issue(make_request(search_scope="board"))
+        second = issuer.issue(make_request(search_scope="board"))
+        assert first.created and not second.created and second.id == first.id
+        assert len([r for r in server.requests if r.method == "POST"]) == 1
+
+    def test_inbox_scope_does_not_see_cards_outside_inbox(self):
+        server = MockTrello()
+        issuer = make_issuer(server)
+        issuer.issue(make_request())
+        server.board = server.inbox
+        server.inbox = []
+        assert issuer.issue(make_request()).created
+        assert len([r for r in server.requests if r.method == "POST"]) == 2
 
     def test_footer_round_trips_into_trello_card(self):
         server = MockTrello()
