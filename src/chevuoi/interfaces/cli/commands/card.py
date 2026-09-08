@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from chevuoi.application.services.project_resolver import ProjectResolver
 from chevuoi.application.usecases.issue_card_usecase import IssueCardUsecase
-from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.task_proposal import ProposalKind, TaskProposal
 from chevuoi.domain.exceptions import CardIssueError
 from chevuoi.domain.value_objects.project_tag import ProjectTag
@@ -25,13 +24,25 @@ def issue_card(
     kind: Annotated[ProposalKind, typer.Option(help="種別")] = "chore",
 ) -> None:
     tag = tag.strip()
-    if not tag or " " in tag:
+    # 全角スペースなども区切りとみなす（ProjectTag.from_title と同じ空白判定に揃える）。
+    # ここを半角スペースだけで見ると、対応表で引けないタグを黙って作ってしまう
+    if len(tag.split()) != 1:
         print("tag は空白を含まない 1 語で指定してください", file=sys.stderr)
         raise typer.Exit(code=1)
-    project = Project(tag=ProjectTag(value=tag), repo_path=Path("."))
+    injector = get_injector(ctx)
+    # 対象プロジェクトはタグを設定の対応表で引いて決める。カレントディレクトリで
+    # 代用すると、対象プロジェクトではなく実行場所のリポジトリを対象として渡すことになる
+    project = injector.get(ProjectResolver).resolve(ProjectTag(value=tag))
+    if project.is_null:
+        # 設定漏れでも起票そのものは止めない（対象リポジトリは特定できないまま発行する）
+        print(
+            f"警告: タグ「{tag}」に対応するプロジェクトが設定にありません。"
+            "対象リポジトリを特定しないまま起票します",
+            file=sys.stderr,
+        )
     proposal = TaskProposal(title=title, body=body, kind=kind)
     try:
-        issued = get_injector(ctx).get(IssueCardUsecase).execute(proposal, project)
+        issued = injector.get(IssueCardUsecase).execute(proposal, project)
     except CardIssueError as e:
         print(str(e), file=sys.stderr)
         raise typer.Exit(code=1)
