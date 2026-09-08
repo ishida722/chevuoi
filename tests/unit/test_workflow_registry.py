@@ -16,6 +16,8 @@ from chevuoi.domain.ports.workflow_loader import (
     WorkflowLoader,
 )
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
+from chevuoi.infrastructure.config.settings import RouterConfig
+from tests.unit.fakes import make_config
 
 
 def make_meta(name: str, **kwargs) -> WorkflowMeta:
@@ -126,8 +128,9 @@ def test_report_format():
         invalid={"broken_flow": "workflow.toml: 未知のフィールド ['when_to_used']"},
     )
     registry, _ = make_registry(result)
-    report = WorkflowReportUsecase(registry).execute()
+    report = WorkflowReportUsecase(registry, make_config(router=RouterConfig(model="haiku"))).execute()
     assert report == (
+        "✓ ルーターモデル haiku\n"
         "✓ ワークフロー 2 件\n"
         "● research         v0.2.0   p50   #research #web\n"
         "    ウェブを検索して調査レポートを作成する\n"
@@ -138,3 +141,10 @@ def test_report_format():
         "✗ 1 件が読み込めません\n"
         "✗ broken_flow      workflow.toml: 未知のフィールド ['when_to_used']"
     )
+
+
+def test_report_shows_default_model_when_router_model_is_empty():
+    # 設定漏れ（model = ""）でも「既定モデルで動いている」ことがレポートから分かる
+    registry, _ = make_registry(ScanResult())
+    report = WorkflowReportUsecase(registry, make_config(router=RouterConfig(model=""))).execute()
+    assert report.splitlines()[0] == "✓ ルーターモデル 未指定（Claude Code の既定モデル）"

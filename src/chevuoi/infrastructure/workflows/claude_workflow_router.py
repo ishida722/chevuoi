@@ -71,13 +71,14 @@ class ClaudeWorkflowRouter(WorkflowRouter):
     """claude -p に名前を 1 つ出させ、候補に実在するものだけを採用する。
 
     候補外の名前・解析不能・runner 失敗はすべて棄権として返す。
-    モデルは `[router] model` で指定する（分類だけなので軽量モデルで十分）。
+    モデルは `[router] model` で指定する（分類だけなので既定は軽量モデル）。
     """
 
     @inject
     def __init__(self, runner: Runner, config: AppConfig) -> None:
         self._runner = runner
-        self._model = config.router.model
+        # 空文字列は「指定しない」＝ Claude Code の既定モデル
+        self._model = config.router.model or None
 
     def build_prompt(self, card: Card, candidates: list[WorkflowMeta]) -> str:
         return PROMPT_TEMPLATE.format(

@@ -7,8 +7,12 @@ import typer
 
 from chevuoi.application.usecases.run_workflow_usecase import RunWorkflowUsecase
 from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
-from chevuoi.application.usecases.workflow_report_usecase import WorkflowReportUsecase
+from chevuoi.application.usecases.workflow_report_usecase import (
+    WorkflowReportUsecase,
+    format_router_model,
+)
 from chevuoi.domain.exceptions import WorkflowError
+from chevuoi.infrastructure.config.settings import AppConfig
 from chevuoi.interfaces.cli.adhoc_card import AdhocCard
 from chevuoi.interfaces.cli.context import get_injector
 
@@ -53,9 +57,11 @@ def select_workflow(
     title: Annotated[str, typer.Argument(help="カードのタイトル")],
     desc: Annotated[str, typer.Argument(help="カードの本文（省略可）")] = "",
 ) -> None:
-    meta, decision = get_injector(ctx).get(SelectWorkflowUsecase).execute(
-        AdhocCard(title, desc)
-    )
+    injector = get_injector(ctx)
+    # 起動時レポートと同じ「ルーターの設定値」を出す。タイトルに [intent] マーカーがある
+    # カードは LLM を呼ばずに決まるため、「この実行で使われたモデル」とは断定しない
+    print(f"ルーターモデル: {format_router_model(injector.get(AppConfig))}")
+    meta, decision = injector.get(SelectWorkflowUsecase).execute(AdhocCard(title, desc))
     chosen = meta.name if meta else "（棄権 → needs_human）"
     print(f"選択: {chosen}")
     print(f"確信度: {decision.confidence}")

@@ -29,12 +29,17 @@ class LlmConfig(BaseModel):
     model: str  # 例: "claude-sonnet-5"。認証はプロバイダ既定の環境変数に委ねる
 
 
+# ルーターの既定モデル。候補から名前を 1 つ選ぶだけの処理なので軽量モデルで足りる。
+# 設定漏れのまま重いモデル（Claude Code の既定）で回り続ける事故を防ぐため既定値を置く
+DEFAULT_ROUTER_MODEL = "haiku"
+
+
 class RouterConfig(BaseModel):
     """[router] の内容。ワークフロー選択（ClaudeWorkflowRouter）専用の設定。"""
 
-    # claude --model に渡す値（例: "haiku"）。None なら Claude Code の既定モデル。
-    # LlmConfig.model（langchain のモデル ID）とは別物
-    model: str | None = None
+    # claude --model に渡す値（例: "haiku"）。空文字列にすると --model を付けず
+    # Claude Code の既定モデルで動く。LlmConfig.model（langchain のモデル ID）とは別物
+    model: str = DEFAULT_ROUTER_MODEL
 
 
 class ProjectConfig(BaseModel):
