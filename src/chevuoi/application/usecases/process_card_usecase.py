@@ -160,7 +160,13 @@ class ProcessCardUsecase:
             workflow = self.registry.get(meta.name)
             logger.info("ワークフロー実行開始: %s (%s)", card.name, meta.name)
             result = self.executor.execute(
-                workflow, self.build_message(card), workdir=worktree.path, project=project
+                workflow,
+                self.build_message(card),
+                workdir=worktree.path,
+                project=project,
+                # 終端処理（finalize）が「変更なし」に使うのと同じ判定を渡す。
+                # ワークフローが自前で git を叩くと判定条件がずれるため
+                has_changes=lambda: self.worktrees.has_changes(worktree),
             )
             logger.info("ワークフロー実行終了: %s (blocked=%s)", card.name, bool(result.blocked))
             # 終端状態に関わらず起票する（blocked でも踏んだバグは実在する）。例外は出さない
