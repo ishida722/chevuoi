@@ -7,7 +7,7 @@ from chevuoi.domain.entities.issue_report import IssuedCard
 from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.worktree import Worktree
 from chevuoi.domain.exceptions import CardIssueError
-from chevuoi.domain.ports.card_issuer import CardIssueRequest, CardIssuer
+from chevuoi.domain.ports.card_issuer import CardIssueRequest, CardIssuer, SearchScope
 from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
@@ -94,7 +94,7 @@ class FakeCardIssuer(CardIssuer):
         self.requests: list[CardIssueRequest] = []
         self.by_key: dict[str, IssuedCard] = {}
 
-    def find_by_key(self, key: str) -> IssuedCard | None:
+    def find_by_key(self, key: str, *, scope: SearchScope = "inbox") -> IssuedCard | None:
         return self.by_key.get(key)
 
     def issue(self, request: CardIssueRequest) -> IssuedCard:

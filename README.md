@@ -15,6 +15,7 @@
 やること:
 
 - 複数のタスクソース（初期は Trello のみ）からのチケット取得
+- 自分にレビュー依頼が来ている PR のカード化（`vuoi review-requests`）
 - チケット種別に応じた経路（implement / investigate / design / trivial）の選択
 - git worktree による作業隔離
 - `claude -p` をノードとするパイプライン実行
@@ -73,6 +74,7 @@ claude --help | grep -A3 -- --permission-mode
 ```bash
 vuoi run                      # 全ソースをポーリングして1巡
 vuoi run --source trello --limit 1
+vuoi review-requests          # レビュー依頼中の PR を Inbox にカードとして起票
 vuoi resume <run_id>          # 中断ランの再開
 vuoi status                   # 未終端ランの一覧
 vuoi gc --older-than 7d       # 終端済み worktree の掃除
