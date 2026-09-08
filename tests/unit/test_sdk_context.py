@@ -24,7 +24,10 @@ from chevuoi.infrastructure.workflows.langgraph_executor import LangGraphExecuto
 
 
 class NoopRunner(Runner):
-    def run(self, prompt, *, cwd=None, session_id=None, allowed_tools=None, model=None):
+    def run(
+        self, prompt, *, cwd=None, session_id=None, allowed_tools=None, model=None,
+        permission_mode=None,
+    ):
         return RunResult(ok=True, output=prompt)
 
 

@@ -33,11 +33,16 @@ class ClaudeCliRunner(Runner):
         session_id: str | None,
         allowed_tools: Sequence[str] | None = None,
         model: str | None = None,
+        permission_mode: str | None = None,
     ) -> list[str]:
-        # --permission-mode auto: 非対話（-p）では承認を求める先が無く、既定のままだと
-        # Write / Edit と書き込みを伴う Bash がその場で拒否される。信頼ダイアログは -p で
-        # スキップされるため、効いているのはツール承認のほう。
-        cmd = ["claude", "-p", prompt, "--output-format", "json", "--permission-mode", "auto"]
+        cmd = ["claude", "-p", prompt, "--output-format", "json"]
+        # 権限モードは呼び出し単位のオプトイン。非対話（-p）では承認を求める先が無いため、
+        # 既定のままだと Write / Edit と書き込みを伴う Bash はその場で拒否される。逆に
+        # "auto" を付けるとそれらが通るので、信頼できない入力（カード本文など）をプロンプトに
+        # 埋め込む呼び出しでは付けない。--allowedTools は事前承認であって制限ではないため、
+        # 読み取り系だけを渡しても "auto" と組み合わせれば書き込みは防げない。
+        if permission_mode:  # 空文字列も未指定扱い
+            cmd += ["--permission-mode", permission_mode]
         if session_id is not None:
             cmd += ["--resume", session_id]
         if allowed_tools is not None:
@@ -54,10 +59,11 @@ class ClaudeCliRunner(Runner):
         session_id: str | None = None,
         allowed_tools: Sequence[str] | None = None,
         model: str | None = None,
+        permission_mode: str | None = None,
     ) -> RunResult:
         try:
             proc = subprocess.run(
-                self.build_command(prompt, session_id, allowed_tools, model),
+                self.build_command(prompt, session_id, allowed_tools, model, permission_mode),
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -70,11 +76,12 @@ class ClaudeCliRunner(Runner):
 
         result = self._parse(proc)
         logger.info(
-            "claude 実行: ok=%s session=%s cost=%s model=%s",
+            "claude 実行: ok=%s session=%s cost=%s model=%s permission_mode=%s",
             result.ok,
             result.session_id,
             result.cost_usd,
             model,
+            permission_mode,
         )
         return result
 

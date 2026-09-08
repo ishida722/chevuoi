@@ -33,7 +33,9 @@ class GhPullRequestPublisher(PullRequestPublisher):
             cwd, "gh", "pr", "create", "--head", worktree.branch.value,
             "--title", title, "--body", body,
         )
-        return created.stdout.strip().splitlines()[-1]
+        url = created.stdout.strip().splitlines()[-1]
+        logger.info("PR を新規作成: %s", url)
+        return url
 
     @staticmethod
     def _run(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:

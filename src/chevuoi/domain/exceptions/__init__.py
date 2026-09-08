@@ -18,6 +18,10 @@ class CardIssueError(ChevuoiError):
     """カードの発行に失敗した（Inbox 未設定・API エラーなど）。"""
 
 
+class ReviewRequestError(ChevuoiError):
+    """レビュー依頼中の PR の取得に失敗した（gh の実行失敗・出力の解釈失敗など）。"""
+
+
 class WorkflowError(ChevuoiError):
     """ワークフローのロード・設定に失敗した。"""
 

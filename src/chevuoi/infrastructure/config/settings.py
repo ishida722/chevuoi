@@ -47,6 +47,9 @@ class ProjectConfig(BaseModel):
 
     path: Path
     test_commands: list[str] = []  # テストゲートで実行するコマンド（worktree 内で順に実行）
+    # GitHub 上のリポジトリ（"owner/name" でも URL でも可）。省略時は path の origin から引く。
+    # PR レビュー依頼とプロジェクトの照合に使う
+    repo: str | None = None
 
 
 class AppConfig(BaseModel):

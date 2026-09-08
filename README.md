@@ -15,6 +15,7 @@
 やること:
 
 - 複数のタスクソース（初期は Trello のみ）からのチケット取得
+- 自分にレビュー依頼が来ている PR のカード化（`vuoi review-requests`）
 - チケット種別に応じた経路（implement / investigate / design / trivial）の選択
 - git worktree による作業隔離
 - `claude -p` をノードとするパイプライン実行
@@ -56,6 +57,16 @@ Python 3.12 以上と [uv](https://docs.astral.sh/uv/) が必要です。
 uv sync
 ```
 
+実行ノードには Claude Code CLI（`claude`）を使います。ファイルを編集するワークフローは
+`--permission-mode auto` を使うため、この値を受け付けるバージョンが必要です（動作確認済み: 2.1.252）。
+`auto` を知らない古い CLI では引数解析の時点で失敗し、このオプションを使う実行だけが `ok=False`
+になります（ルーターなど渡さない実行は成功するので、ワークフローの実装ノードだけが落ちる形で
+現れます）。次のコマンドで `auto` が選択肢にあるか確認できます。
+
+```bash
+claude --help | grep -A3 -- --permission-mode
+```
+
 設定は TOML ファイルで行います。既定のパスは `~/.config/vuoi/config.toml` で、`--config` オプションで変更できます。Trello の認証情報は、設定ファイルに無ければ環境変数 `TRELLO_KEY` / `TRELLO_TOKEN` から読み込みます。ユーザー定義ワークフローの既定の置き場所は `$XDG_CONFIG_HOME/vuoi/workflows`（未設定時は `~/.config/vuoi/workflows`）です。
 
 ## 使い方
@@ -63,6 +74,7 @@ uv sync
 ```bash
 vuoi run                      # 全ソースをポーリングして1巡
 vuoi run --source trello --limit 1
+vuoi review-requests          # レビュー依頼中の PR を Inbox にカードとして起票
 vuoi resume <run_id>          # 中断ランの再開
 vuoi status                   # 未終端ランの一覧
 vuoi gc --older-than 7d       # 終端済み worktree の掃除

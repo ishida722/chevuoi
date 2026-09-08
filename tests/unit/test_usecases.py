@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from chevuoi.application.usecases.gc_usecase import GcUsecase
@@ -93,6 +94,9 @@ def result_with(*proposals: TaskProposal, **kw) -> ExecutionResult:
     return ExecutionResult(output="", state={}, summary="やった", proposals=list(proposals), **kw)
 
 
+PROCESS_CARD_LOGGER = "chevuoi.application.usecases.process_card_usecase"
+
+
 class TestProcessCardUsecase:
     def test_pr_outcome_with_changes_publishes_pr(self):
         usecase, worktrees, executor, publisher = make_usecase()
@@ -137,6 +141,28 @@ class TestProcessCardUsecase:
         assert publisher.calls == [] and worktrees.removed == []
         assert card.comments[0].startswith("🤖 blocked: テスト2回失敗") and "/tmp/wt" in card.comments[0]
         assert card.moved_to_review
+
+    def test_terminal_kind_is_logged(self, caplog):
+        # ログ単体で終端状態を区別できること。期待する種別だけが出て、他は出ないこと
+        cases = [
+            (make_usecase(), FakeCard("MIRAI x"), "PR"),
+            (make_usecase(changes=False), FakeCard("MIRAI x"), "変更なし"),
+            (make_usecase(workflow="task"), FakeCard("MIRAI x"), "コメント報告"),
+            (
+                make_usecase(ExecutionResult(output="", state={}, blocked="失敗", summary="x")),
+                FakeCard("MIRAI x"),
+                "blocked",
+            ),
+            (make_usecase(), FakeCard("texts x"), "needs_human (プロジェクト未特定)"),
+            (make_usecase(workflow=None), FakeCard("MIRAI x"), "needs_human (ワークフロー未決定)"),
+        ]
+        kinds = [kind for _, _, kind in cases]
+        for (usecase, _, _, _), card, expected in cases:
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger=PROCESS_CARD_LOGGER):
+                usecase.execute(card)
+            logged = [k for k in kinds if f"終端: {k}" in caplog.text]
+            assert logged == [expected]
 
     def test_abstain_is_needs_human_without_worktree(self):
         usecase, worktrees, executor, _ = make_usecase(workflow=None)

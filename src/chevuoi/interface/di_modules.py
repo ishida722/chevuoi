@@ -13,9 +13,13 @@ from chevuoi.domain.ports.workflow_loader import WorkflowLoader
 from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
+from chevuoi.domain.ports.repository_locator import RepositoryLocator
+from chevuoi.domain.ports.review_request_provider import ReviewRequestProvider
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.infrastructure.config.settings import AppConfig
 from chevuoi.infrastructure.git.gh_pull_request_publisher import GhPullRequestPublisher
+from chevuoi.infrastructure.git.gh_review_request_provider import GhReviewRequestProvider
+from chevuoi.infrastructure.git.git_repository_locator import GitRepositoryLocator
 from chevuoi.infrastructure.git.git_worktree_manager import GitWorktreeManager
 from chevuoi.infrastructure.trello.client import TrelloClient
 from chevuoi.infrastructure.trello.trello_card_issuer import TrelloCardIssuer
@@ -40,6 +44,9 @@ class AppModule(Module):
         # IssueCardUsecase / IssueProposalsUsecase は @inject の自動解決に任せる（bind 不要）
         binder.bind(WorktreeManager, to=GitWorktreeManager, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(PullRequestPublisher, to=GhPullRequestPublisher, scope=singleton)  # type: ignore[type-abstract]
+        binder.bind(ReviewRequestProvider, to=GhReviewRequestProvider, scope=singleton)  # type: ignore[type-abstract]
+        # GitRepositoryLocator はリポジトリ名をキャッシュするため singleton
+        binder.bind(RepositoryLocator, to=GitRepositoryLocator, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowScanner, to=FsWorkflowScanner, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowLoader, to=PythonWorkflowLoader, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(LlmFactory, to=LangchainLlmFactory, scope=singleton)  # type: ignore[type-abstract]
