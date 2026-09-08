@@ -120,14 +120,17 @@ class FakeWorktreeManager(WorktreeManager):
         self.removed: list[Worktree] = []
         self.finished: list[Worktree] = []
         self.changes = True
+        self.handed_out: list[Worktree] = []
 
     def create(self, project: Project, card: Card) -> Worktree:
         self.created.append((project, card))
-        return Worktree(
+        worktree = Worktree(
             path=Path("/tmp/wt"),
             branch=BranchName.from_card_id(card.id),
             repo_path=project.repo_path,
         )
+        self.handed_out.append(worktree)
+        return worktree
 
     def list_stale(self, older_than_days: int) -> list[Worktree]:
         return self.finished
@@ -136,6 +139,14 @@ class FakeWorktreeManager(WorktreeManager):
         self.removed.append(worktree)
 
     def has_changes(self, worktree: Worktree) -> bool:
+        """実物の git と同じく、問い合わせた worktree の事実を返す。
+
+        引数を無視して定数を返すと、ホストが「別の worktree の事実」を見ている誤りを
+        テストが素通しする。この fake が知っているのは create で払い出した worktree
+        だけなので、それ以外を問い合わせたら答えずに落とす。
+        """
+        if worktree not in self.handed_out:
+            raise AssertionError(f"払い出していない worktree への問い合わせ: {worktree.path}")
         return self.changes
 
 
@@ -146,12 +157,24 @@ class FakeExecutor(GraphExecutor):
         self.calls: list[dict] = []
 
     def execute(
-        self, workflow: LoadedWorkflow, message: str, *, workdir=None, project=None
+        self,
+        workflow: LoadedWorkflow,
+        message: str,
+        *,
+        workdir=None,
+        project=None,
+        has_changes=None,
     ) -> ExecutionResult:
         if self.exc is not None:
             raise self.exc
         self.calls.append(
-            {"workflow": workflow, "message": message, "workdir": workdir, "project": project}
+            {
+                "workflow": workflow,
+                "message": message,
+                "workdir": workdir,
+                "project": project,
+                "has_changes": has_changes,
+            }
         )
         return self.result
 

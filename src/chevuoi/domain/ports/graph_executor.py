@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -38,4 +39,8 @@ class GraphExecutor(ABC):
         *,
         workdir: Path | None = None,
         project: Project | None = None,
-    ) -> ExecutionResult: ...
+        has_changes: Callable[[], bool] | None = None,
+    ) -> ExecutionResult:
+        """has_changes: 成果となる変更があるかの判定。ワークフローは ctx.has_changes()
+        で読む。ホストが終端処理に使うのと同じ判定を渡すこと（同じ事実を見せるため）。
+        渡さない実行では、ワークフロー側が「変更あり」として扱う。"""

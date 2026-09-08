@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -119,6 +119,9 @@ _PROPOSAL_KINDS = ("bug", "chore", "spike", "debt")
 _workdir: ContextVar[Path | None] = ContextVar("vuoi_workdir", default=None)
 _project: ContextVar[ProjectInfo | None] = ContextVar("vuoi_project", default=None)
 _proposals: ContextVar[list[Proposal] | None] = ContextVar("vuoi_proposals", default=None)
+_has_changes: ContextVar[Callable[[], bool] | None] = ContextVar(
+    "vuoi_has_changes", default=None
+)
 
 
 @contextmanager
@@ -145,6 +148,21 @@ def bind_project(project: ProjectInfo) -> Iterator[None]:
 
 
 @contextmanager
+def bind_has_changes(probe: Callable[[], bool]) -> Iterator[None]:
+    """ホストが 1 回の実行に「成果となる変更があるか」の判定を束縛する。
+
+    ワークフローは ctx.has_changes() で読む。ホストが終端処理で「変更なし」と
+    するかどうかに使うのと同じ判定を渡すことで、ワークフロー側の分岐（レビューを
+    飛ばす等）とホストの終端判定が同じ事実を見る。
+    """
+    token = _has_changes.set(probe)
+    try:
+        yield
+    finally:
+        _has_changes.reset(token)
+
+
+@contextmanager
 def bind_proposals(sink: list[Proposal]) -> Iterator[None]:
     """ホストが 1 回の実行に申告の収集先を束縛する。ワークフローは ctx.propose で積む。
 
@@ -168,6 +186,7 @@ class WorkflowContext:
     workdir: この実行の作業ディレクトリ（カードの worktree など）。
              runner.run(cwd=ctx.workdir) や subprocess の cwd に渡す。
     project: 対象プロジェクトの情報。カード起点でない実行（vuoi workflow run 等）では None。
+    has_changes(): 作業ツリーに成果となる変更があるか。ホストの終端判定と同じ事実。
     """
 
     llm: BaseChatModel | None
@@ -183,6 +202,30 @@ class WorkflowContext:
     @property
     def project(self) -> ProjectInfo | None:
         return _project.get()
+
+    def has_changes(self) -> bool:
+        """作業ツリーに成果となる変更があるか。呼ぶたびにホストへ問い合わせる。
+
+        ホストが終端処理で「変更なし」と判定するのと同じ事実を返す。未コミットの変更
+        （追跡外ファイル含む）に加え、ベースブランチとの差分＝コミット済みの成果も含む。
+        差分ゼロの回にレビューや要約を走らせない、といった分岐に使う。git を自前で
+        叩くとホストの判定条件とずれるので、この値に一本化する。
+
+        判定は毎回評価する（キャッシュしない）。ノードが変更を加えた前後で答えは変わる。
+        判定できない場合（ベースブランチを解決できない等）はホスト側の例外がそのまま
+        伝播する。「判定できない」を黙って「変更なし」に倒すと成果を捨てるため。
+
+        ホストの束縛外（vuoi workflow run など、対象の worktree が無い実行）では
+        警告を出して True を返す。ここで False に倒すと、ワークフローが成果のある回を
+        「変更なし」と誤って扱いうるため。
+        """
+        probe = _has_changes.get()
+        if probe is None:
+            self._log().warning(
+                "has_changes の判定が束縛されていないため「変更あり」として扱います"
+            )
+            return True
+        return probe()
 
     def propose(
         self,
@@ -260,6 +303,7 @@ __all__ = [
     "RunResult",
     "Runner",
     "WorkflowContext",
+    "bind_has_changes",
     "bind_project",
     "bind_proposals",
     "bind_workdir",

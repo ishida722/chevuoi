@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 from pydantic import ValidationError
 
-from vuoi_sdk import ProjectInfo, Proposal, bind_project, bind_proposals, bind_workdir
+from vuoi_sdk import (
+    ProjectInfo,
+    Proposal,
+    bind_has_changes,
+    bind_project,
+    bind_proposals,
+    bind_workdir,
+)
 
 from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.task_proposal import TaskProposal
@@ -21,6 +29,7 @@ class LangGraphExecutor(GraphExecutor):
     """CompiledStateGraph を invoke する。初期 state は BaseState 契約に従い
     messages のみ渡す（拡張キーはワークフロー側が既定値を扱う）。
     workdir / project は SDK の ContextVar に束縛し、ワークフローは ctx.workdir / ctx.project で読む。
+    差分の有無の判定（has_changes）も同じ流儀で束縛し、ワークフローは ctx.has_changes() で読む。
     ctx.propose の申告も同じ流儀で実行ごとに収集し、ExecutionResult.proposals へ写す。
     """
 
@@ -31,6 +40,7 @@ class LangGraphExecutor(GraphExecutor):
         *,
         workdir: Path | None = None,
         project: Project | None = None,
+        has_changes: Callable[[], bool] | None = None,
     ) -> ExecutionResult:
         initial = [HumanMessage(message)] if message else []
         sink: list[Proposal] = []
@@ -39,6 +49,8 @@ class LangGraphExecutor(GraphExecutor):
                 stack.enter_context(bind_workdir(workdir))
             if project is not None:
                 stack.enter_context(bind_project(_to_info(project)))
+            if has_changes is not None:
+                stack.enter_context(bind_has_changes(has_changes))
             stack.enter_context(bind_proposals(sink))
             state = workflow.graph.invoke({"messages": initial})
         messages = state.get("messages", [])

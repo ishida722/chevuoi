@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
 
+import pytest
+
 from chevuoi.application.usecases.gc_usecase import GcUsecase
 from chevuoi.application.usecases.issue_card_usecase import IssueCardUsecase
 from chevuoi.application.usecases.issue_proposals_usecase import IssueProposalsUsecase
@@ -115,6 +117,18 @@ class TestProcessCardUsecase:
         usecase.execute(card)
         assert publisher.calls == []
         assert card.comments[0].startswith("🤖 変更なし:") and card.moved_to_review
+
+    @pytest.mark.parametrize("changes", [False, True])
+    def test_workflow_probe_reports_the_same_worktree_fact_as_finalize(self, changes):
+        """ワークフローに渡される has_changes が、終端処理が「変更なし」判定に使うのと
+        同じ worktree の同じ事実を返すこと。
+
+        （終端の分岐そのものは test_pr_outcome_* が担保しているので、ここでは重ねない）
+        """
+        usecase, _, executor, _ = make_usecase(changes=changes)
+        usecase.execute(FakeCard("MIRAI 変更判定"))
+        probe = executor.calls[0]["has_changes"]
+        assert probe() is changes
 
     def test_comment_outcome_never_publishes(self):
         usecase, _, _, publisher = make_usecase(workflow="task")
