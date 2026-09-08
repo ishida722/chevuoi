@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+from chevuoi.application.services.project_resolver import ProjectResolver
 from chevuoi.application.usecases.gc_usecase import GcUsecase
 from chevuoi.application.usecases.issue_card_usecase import IssueCardUsecase
 from chevuoi.application.usecases.issue_proposals_usecase import IssueProposalsUsecase
@@ -81,7 +82,8 @@ def make_usecase(
     config = make_config(projects)
     proposals = IssueProposalsUsecase(IssueCardUsecase(issuer or FakeCardIssuer()), config)
     usecase = ProcessCardUsecase(
-        worktrees, selector, registry, executor, publisher, config, proposals
+        worktrees, selector, registry, executor, publisher, config, proposals,
+        ProjectResolver(config),
     )
     return usecase, worktrees, executor, publisher
 
@@ -200,6 +202,8 @@ class TestProcessCardUsecase:
         assert card.moved_to_review
 
     def test_tag_lookup_ignores_case(self):
+        """カードのタグ解決が ProjectResolver に委譲されていること
+        （大小文字が違っても設定のプロジェクトを引けること）。"""
         usecase, _, _, _ = make_usecase(projects={"wf": Path("/repo/wf")})
         project = usecase.resolve_project(FakeCard("Wf [dev]ドキュメント作成"))
         assert project.repo_path == Path("/repo/wf")

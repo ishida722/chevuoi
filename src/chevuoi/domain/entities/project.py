@@ -20,10 +20,13 @@ class Project(BaseModel):
 
 
 class NullProject(Project):
-    """解決できなかったことを表す Null Object。処理側は is_null で判定する。"""
+    """解決できなかったことを表す Null Object。処理側は is_null で判定する。
 
-    def __init__(self) -> None:
-        super().__init__(tag=ProjectTag(value=""), repo_path=Path(""))
+    引けなかったタグは保持する（起票のようにタグだけは使う処理があるため）。
+    """
+
+    def __init__(self, tag: ProjectTag | None = None) -> None:
+        super().__init__(tag=tag or ProjectTag(value=""), repo_path=Path(""))
 
     @property
     def is_null(self) -> bool:

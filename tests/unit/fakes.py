@@ -27,9 +27,7 @@ def make_config(**overrides) -> AppConfig:
             in_progress_list_id="p",
             in_review_list_id="v",
         ),
-        projects={},
-        worktree_root="/tmp",
-        **overrides,
+        **{"projects": {}, "worktree_root": "/tmp", **overrides},
     )
 
 
