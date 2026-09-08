@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from injector import inject
 
 from chevuoi.domain.entities.card import Card
@@ -7,6 +10,9 @@ from chevuoi.domain.entities.issue_report import IssuedCard
 from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.task_proposal import TaskProposal
 from chevuoi.domain.ports.card_issuer import CardIssueRequest, CardIssuer, SearchScope
+from chevuoi.domain.ports.repository_inspector import RepositoryInspector
+
+logger = logging.getLogger(__name__)
 
 
 class IssueCardUsecase:
@@ -16,8 +22,9 @@ class IssueCardUsecase:
     """
 
     @inject
-    def __init__(self, issuer: CardIssuer) -> None:
+    def __init__(self, issuer: CardIssuer, inspector: RepositoryInspector) -> None:
         self._issuer = issuer
+        self._inspector = inspector
 
     def execute(
         self,
@@ -48,5 +55,23 @@ class IssueCardUsecase:
             parent=parent.id if parent is not None else None,
             parent_url=parent.url if parent is not None else "",
             search_scope=search_scope,
+            base_commit=self._base_commit(project),
         )
         return self._issuer.issue(request)
+
+    def _base_commit(self, project: Project) -> str:
+        """起票時に見ていたベースのコミット。取れなくても起票は止めない。
+
+        トリアージが「その後この箇所は変わったか」を機械的に判定するための指紋であり、
+        起票そのものの成否には関わらないため、失敗は空文字にして続ける。
+        """
+        if project.is_null or project.repo_path == Path("."):
+            # リポジトリが特定できていない（タグ未対応の PR カード・CLI の暫定 Project）。
+            # git はこの場合カレントディレクトリで動くため、放っておくと無関係な
+            # リポジトリの SHA を指紋として記録してしまう
+            return ""
+        try:
+            return self._inspector.base_commit(project)
+        except Exception as e:  # noqa: BLE001 - 指紋の取得失敗で起票を止めない
+            logger.warning("ベースコミットを取得できませんでした: %s", e)
+            return ""

@@ -98,6 +98,7 @@ class IssueReviewRequestsUsecase:
                 tag=ProjectTag(value=tag),
                 repo_path=entry.path,
                 test_commands=list(entry.test_commands),
+                base_ref=entry.base_ref,
             )
         return projects
 

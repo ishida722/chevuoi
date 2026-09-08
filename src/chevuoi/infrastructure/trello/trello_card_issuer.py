@@ -23,6 +23,8 @@ def build_footer(request: CardIssueRequest) -> str:
         attrs.append(f"parent={request.parent}")
     attrs.append(f"generation={request.generation}")
     attrs.append(f"kind={request.kind}")
+    if request.base_commit:
+        attrs.append(f"base={request.base_commit}")
     lines = ["---", "vuoi: " + " ".join(attrs)]
     if request.parent_url:
         lines.append(f"親カード: {request.parent_url}")

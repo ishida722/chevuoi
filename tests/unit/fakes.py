@@ -10,6 +10,7 @@ from chevuoi.domain.exceptions import CardIssueError
 from chevuoi.domain.ports.card_issuer import CardIssueRequest, CardIssuer, SearchScope
 from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
+from chevuoi.domain.ports.repository_inspector import RepositoryInspector
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.domain.value_objects.branch_name import BranchName
@@ -187,3 +188,50 @@ class FakePublisher(PullRequestPublisher):
     def publish(self, worktree: Worktree, *, title: str, body: str) -> str:
         self.calls.append({"worktree": worktree, "title": title, "body": body})
         return self.url
+
+
+class FakeInspector(RepositoryInspector):
+    """git を触らないインスペクタ。プロセス境界（git）だけを差し替える。
+
+    問い合わせを記録するので、「呼ばれなかったこと」も検証できる。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_commit: str = "base0",
+        missing_paths: tuple[str, ...] = (),
+        changed_paths: tuple[str, ...] = (),
+        refreshed: bool = True,
+        checkout: Path | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._base_commit = base_commit
+        self._missing = set(missing_paths)
+        self._changed = set(changed_paths)
+        self._refreshed = refreshed
+        self._checkout = checkout or Path("/tmp/triage-base")
+        self._error = error
+        self.refreshed: list[Project] = []
+        self.checkouts: list[Project] = []
+        self.base_commit_calls: list[Project] = []
+
+    def refresh(self, project: Project) -> bool:
+        self.refreshed.append(project)
+        return self._refreshed
+
+    def base_commit(self, project: Project) -> str:
+        self.base_commit_calls.append(project)
+        if self._error is not None:
+            raise self._error
+        return self._base_commit
+
+    def path_exists(self, project: Project, path: str) -> bool:
+        return path not in self._missing
+
+    def changed_since(self, project: Project, path: str, since: str) -> bool:
+        return path in self._changed
+
+    def base_checkout(self, project: Project) -> Path:
+        self.checkouts.append(project)
+        return self._checkout

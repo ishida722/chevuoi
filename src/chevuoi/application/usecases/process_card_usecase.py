@@ -253,4 +253,9 @@ class ProcessCardUsecase:
             )
         if entry is None:
             return NullProject()
-        return Project(tag=tag, repo_path=entry.path, test_commands=list(entry.test_commands))
+        return Project(
+            tag=tag,
+            repo_path=entry.path,
+            test_commands=list(entry.test_commands),
+            base_ref=entry.base_ref,
+        )

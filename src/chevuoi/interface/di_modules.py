@@ -14,16 +14,26 @@ from chevuoi.domain.ports.workflow_router import WorkflowRouter
 from chevuoi.domain.ports.workflow_scanner import WorkflowScanner
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
 from chevuoi.domain.ports.repository_locator import RepositoryLocator
+from chevuoi.domain.ports.repository_inspector import RepositoryInspector
 from chevuoi.domain.ports.review_request_provider import ReviewRequestProvider
+from chevuoi.domain.ports.similarity_strategy import SimilarityStrategy
+from chevuoi.domain.ports.triage_card_repository import TriageCardRepository
+from chevuoi.domain.ports.triage_judge import TriageJudge
+from chevuoi.domain.ports.triage_ledger import TriageLedger
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.infrastructure.config.settings import AppConfig
 from chevuoi.infrastructure.git.gh_pull_request_publisher import GhPullRequestPublisher
 from chevuoi.infrastructure.git.gh_review_request_provider import GhReviewRequestProvider
 from chevuoi.infrastructure.git.git_repository_locator import GitRepositoryLocator
+from chevuoi.infrastructure.git.git_repository_inspector import GitRepositoryInspector
 from chevuoi.infrastructure.git.git_worktree_manager import GitWorktreeManager
+from chevuoi.infrastructure.state.json_triage_ledger import JsonTriageLedger
+from chevuoi.infrastructure.strategies.similarity_factory import get_similarity_class
 from chevuoi.infrastructure.trello.client import TrelloClient
 from chevuoi.infrastructure.trello.trello_card_issuer import TrelloCardIssuer
 from chevuoi.infrastructure.trello.trello_card_provider import TrelloCardProvider
+from chevuoi.infrastructure.trello.trello_triage_repository import TrelloTriageRepository
+from chevuoi.infrastructure.triage.claude_triage_judge import ClaudeTriageJudge
 from chevuoi.infrastructure.workflows.claude_cli_runner import ClaudeCliRunner
 from chevuoi.infrastructure.workflows.claude_workflow_router import ClaudeWorkflowRouter
 from chevuoi.infrastructure.workflows.fs_workflow_scanner import FsWorkflowScanner
@@ -54,3 +64,20 @@ class AppModule(Module):
         binder.bind(GraphExecutor, to=LangGraphExecutor, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowRouter, to=ClaudeWorkflowRouter, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(WorkflowRegistry, scope=singleton)  # キャッシュを持つため singleton 必須
+        self._configure_triage(binder)
+
+    def _configure_triage(self, binder: Binder) -> None:
+        """Inbox トリアージ（vuoi triage）に必要な口。TriageUsecase は @inject の
+        自動解決に任せる（bind 不要）。"""
+        binder.bind(TriageCardRepository, to=TrelloTriageRepository, scope=singleton)  # type: ignore[type-abstract]
+        binder.bind(TriageJudge, to=ClaudeTriageJudge, scope=singleton)  # type: ignore[type-abstract]
+        # 台帳はファイルを読み書きするため、読み込み結果を持つ singleton にする
+        binder.bind(TriageLedger, to=JsonTriageLedger, scope=singleton)  # type: ignore[type-abstract]
+        # ベース参照の解決結果をキャッシュするため singleton
+        binder.bind(RepositoryInspector, to=GitRepositoryInspector, scope=singleton)  # type: ignore[type-abstract]
+        # 類似度はファクトリで解決して bind するだけ（設定を変えても DI の記述は変わらない）
+        binder.bind(
+            SimilarityStrategy,  # type: ignore[type-abstract]
+            to=get_similarity_class(self._config.triage.similarity),
+            scope=singleton,
+        )
