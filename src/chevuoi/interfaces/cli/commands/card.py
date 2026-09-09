@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -28,7 +27,9 @@ def issue_card(
     if not tag or " " in tag:
         print("tag は空白を含まない 1 語で指定してください", file=sys.stderr)
         raise typer.Exit(code=1)
-    project = Project(tag=ProjectTag(value=tag), repo_path=Path("."))
+    # 起票はタグしか見ないのでリポジトリは持たせない。偽のパスを置くと git 系の処理が
+    # 実行場所のリポジトリを触る余地を作るため、未解決であることを明示する
+    project = Project(tag=ProjectTag(value=tag), repo_path=None)
     proposal = TaskProposal(title=title, body=body, kind=kind)
     try:
         issued = get_injector(ctx).get(IssueCardUsecase).execute(proposal, project)

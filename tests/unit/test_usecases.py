@@ -402,6 +402,15 @@ class TestProcessCardProposals:
         usecase.execute(proposal("cli"), project)
         assert issuer.requests[1].generation == 0 and issuer.requests[1].parent is None
 
+    def test_issues_card_for_project_without_repo(self):
+        """リポジトリが未解決のプロジェクト（vuoi card issue のようにタグしか無い場合）でも
+        タグ付きで起票できること。起票にリポジトリは要らない。"""
+        issuer = FakeCardIssuer()
+        IssueCardUsecase(issuer).execute(
+            proposal("cli"), Project(tag=ProjectTag(value="MIRAI"), repo_path=None)
+        )
+        assert issuer.requests[0].project_tag == ProjectTag(value="MIRAI")
+
 
 class TestGcUsecase:
     def test_removes_all_finished(self):
