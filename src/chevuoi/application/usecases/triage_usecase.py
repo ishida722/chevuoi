@@ -338,12 +338,16 @@ class TriageUsecase:
         if plan.action == "merge":
             if representative is None:  # 決定表が merge を出す限り代表は必ずある
                 raise ValueError("集約先が決まっていません")
+            # 照合はコメント本文の部分一致なので、鍵の前後（ラベルと改行）まで含めた印で
+            # 照合する。鍵だけを渡すと、あるカード ID が別のカード ID の接頭辞のとき
+            # （trello:b と trello:b2）に別カードの集約コメントを既存とみなしてしまう
+            marker = f"key={merge_comment_key(card)}\n"
             text = (
-                f"{COMMENT_MARK} 重複カードを集約しました digest={digest}\n"
+                f"{COMMENT_MARK} 重複カードを集約しました {marker}"
                 f"- {card.title}: {card.url or card.id}\n"
                 f"理由: {plan.reason or '（記載なし）'}"
             )
-            if not self._cards.has_comment(representative.id, digest):
+            if not self._cards.has_comment(representative.id, marker):
                 self._cards.add_comment(representative.id, text)
             self._cards.add_comment(
                 card.id,
@@ -369,6 +373,17 @@ class TriageUsecase:
         existing = judgments.get(key)
         if existing is None or (existing.abstained and not judgment.abstained):
             judgments[key] = judgment
+
+
+def merge_comment_key(card: TriageCard) -> str:
+    """代表カードに残す集約コメントの冪等キー（コメントには `key=` として書く）。
+
+    digest は正規化したタイトルと本文だけの関数なので、完全一致の重複カード同士では
+    必ず等しくなる。digest だけを冪等キーにすると、1 枚目の集約コメントが 2 枚目以降の
+    投稿を「既に投稿済み」として抑止し、どのカードを畳んだかの記録が代表に残らない。
+    畳まれる側のカード ID を含めて、同じ内容の同じカードの再投稿だけを抑止する。
+    """
+    return f"{card.digest()}/{card.id}"
 
 
 def _pick_judgment(

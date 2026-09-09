@@ -22,8 +22,8 @@ class TriageCardRepository(ABC):
     def add_comment(self, card_id: CardId, text: str) -> None: ...
 
     @abstractmethod
-    def has_comment(self, card_id: CardId, digest: str) -> bool:
-        """同じ digest のトリアージコメントが既にあるか（コメントの冪等性）。"""
+    def has_comment(self, card_id: CardId, key: str) -> bool:
+        """同じ冪等キーを含むトリアージコメントが既にあるか（コメントの冪等性）。"""
 
     @abstractmethod
     def add_label(self, card_id: CardId, label: str) -> None:
