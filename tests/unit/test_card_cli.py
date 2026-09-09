@@ -18,14 +18,14 @@ from chevuoi.domain.value_objects.project_tag import ProjectTag
 from chevuoi.infrastructure.config.settings import AppConfig, ProjectConfig
 from chevuoi.interface.di_modules import AppModule
 from chevuoi.interfaces.cli import main as cli_main
-from tests.unit.fakes import FakeCardIssuer, make_config
+from tests.unit.fakes import FakeCardIssuer, FakeInspector, make_config
 
 
 class RecordingIssueCardUsecase(IssueCardUsecase):
     """CLI から渡された Project を記録する。発行そのものは本物の実装が行う。"""
 
     def __init__(self, issuer: FakeCardIssuer) -> None:
-        super().__init__(issuer)
+        super().__init__(issuer, FakeInspector())
         self.projects: list[Project] = []
 
     def execute(self, proposal, project, **kwargs):
