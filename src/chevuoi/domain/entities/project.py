@@ -13,6 +13,8 @@ class Project(BaseModel):
     tag: ProjectTag
     repo_path: Path
     test_commands: list[str] = []  # テストゲートの中身。有無・回数はワークフローが決める
+    # 差分・鮮度の基準にするブランチ。空なら実装側が origin/HEAD を解決する
+    base_ref: str = ""
 
     @property
     def is_null(self) -> bool:

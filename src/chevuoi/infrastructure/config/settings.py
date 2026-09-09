@@ -42,10 +42,30 @@ class RouterConfig(BaseModel):
     model: str = DEFAULT_ROUTER_MODEL
 
 
+# トリアージ判定の既定モデル。ルーターと同じく分類だけなので軽量モデルで足りる
+DEFAULT_TRIAGE_MODEL = "haiku"
+
+
+class TriageConfig(BaseModel):
+    """[triage] の内容。Inbox トリアージ（vuoi triage）専用の設定。"""
+
+    enabled: bool = True
+    model: str = DEFAULT_TRIAGE_MODEL  # claude --model に渡す値。空文字列なら既定モデル
+    similarity: str = "trigram"  # 類似度の実装名（similarity_factory が解決する）
+    similarity_threshold: float = 0.55  # 第 1 段階の dry-run 運用で較正する
+    max_pairs_per_run: int = 20  # LLM に照会する重複候補ペアの上限
+    max_judgments_per_run: int = 30  # 1 ランの LLM 呼び出し総数（重複 + 解決済みの合計）
+    settle_minutes: int = 10  # これより新しいカードは触らない（起票中のランと競合しない）
+    apply: bool = False  # 既定は dry-run。CLI の --apply が上書きする
+    ledger_path: Path = Path.home() / ".local" / "state" / "vuoi" / "triage.json"
+
+
 class ProjectConfig(BaseModel):
     """[projects.<tag>] の内容。TOML では文字列（パスのみ）でも書ける。"""
 
     path: Path
+    # 差分の基準にするブランチ（例: "origin/main"）。省略時は origin/HEAD を解決する
+    base_ref: str = ""
     test_commands: list[str] = []  # テストゲートで実行するコマンド（worktree 内で順に実行）
     # GitHub 上のリポジトリ（"owner/name" でも URL でも可）。省略時は path の origin から引く。
     # PR レビュー依頼とプロジェクトの照合に使う
@@ -64,6 +84,7 @@ class AppConfig(BaseModel):
     workflow_defaults: dict[str, Any] = {}
     proposals: ProposalsConfig = ProposalsConfig()
     router: RouterConfig = RouterConfig()  # セクション省略可
+    triage: TriageConfig = TriageConfig()  # セクション省略可
 
     @field_validator("projects", mode="before")
     @classmethod

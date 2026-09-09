@@ -16,6 +16,7 @@
 
 - 複数のタスクソース（初期は Trello のみ）からのチケット取得
 - 自分にレビュー依頼が来ている PR のカード化（`vuoi review-requests`）
+- Inbox に溜まったカードの整理（`vuoi triage`。重複の集約・解決済みの畳み込み・ラベル付け）
 - チケット種別に応じた経路（implement / investigate / design / trivial）の選択
 - git worktree による作業隔離
 - `claude -p` をノードとするパイプライン実行
@@ -78,6 +79,8 @@ vuoi review-requests          # レビュー依頼中の PR を Inbox にカー�
 vuoi resume <run_id>          # 中断ランの再開
 vuoi status                   # 未終端ランの一覧
 vuoi gc --older-than 7d       # 終端済み worktree の掃除
+vuoi triage                   # Inbox の整理（重複の集約・解決済みの畳み込み・ラベル付け）
+vuoi triage --apply           # 整理の計画を適用する（既定は dry-run）
 vuoi workflow list            # ユーザー定義ワークフローの一覧
 vuoi workflow run <name> ["メッセージ"]   # ワークフローを名指しで1回実行
 vuoi workflow select <title> ["本文"]    # カード内容からワークフローを選ぶ
