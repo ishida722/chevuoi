@@ -10,6 +10,10 @@ class ProjectNotFoundError(ChevuoiError):
     """タグに対応するプロジェクトが対応表に無い。"""
 
 
+class ProjectNotResolvedError(ChevuoiError):
+    """未解決のプロジェクトのリポジトリを参照しようとした（is_null の判定漏れ）。"""
+
+
 class WorktreeError(ChevuoiError):
     """git worktree の操作に失敗した。"""
 

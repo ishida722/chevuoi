@@ -421,6 +421,15 @@ class TestProcessCardProposals:
         usecase.execute(proposal("cli"), project)
         assert issuer.requests[1].generation == 0 and issuer.requests[1].parent is None
 
+    def test_issues_card_for_project_without_repo(self):
+        """リポジトリが未解決のプロジェクト（vuoi card issue のようにタグしか無い場合）でも
+        タグ付きで起票できること。起票にリポジトリは要らない。"""
+        issuer = FakeCardIssuer()
+        IssueCardUsecase(issuer, FakeInspector()).execute(
+            proposal("cli"), Project(tag=ProjectTag(value="MIRAI"), repo_path=None)
+        )
+        assert issuer.requests[0].project_tag == ProjectTag(value="MIRAI")
+
     def test_base_commit_is_recorded_at_issue_time(self):
         """起票時に見ていたベースのコミットを発行要求に載せること
         （後からトリアージが「その後この箇所は変わったか」を判定できる）。"""

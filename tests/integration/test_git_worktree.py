@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from chevuoi.domain.entities.project import Project
-from chevuoi.domain.exceptions import WorktreeError
+from chevuoi.domain.entities.project import NullProject, Project
+from chevuoi.domain.exceptions import ProjectNotResolvedError, WorktreeError
 from chevuoi.domain.value_objects.project_tag import ProjectTag
 from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
 from chevuoi.infrastructure.git.git_repository_inspector import GitRepositoryInspector
@@ -23,6 +23,12 @@ def repo(tmp_path: Path) -> Path:
                         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
                         "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"})
     return repo
+
+
+def _git_out(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True
+    ).stdout
 
 
 def make_manager(tmp_path: Path) -> GitWorktreeManager:
@@ -55,6 +61,25 @@ def repo_with_origin(tmp_path: Path, repo: Path) -> Path:
 
 
 class TestGitWorktreeManager:
+    def test_unresolved_project_does_not_touch_the_repo_at_cwd(self, tmp_path, repo, monkeypatch):
+        """リポジトリが未解決のプロジェクトで worktree を作ろうとすると例外になり、
+        実行場所（カレントディレクトリ）のリポジトリにブランチも worktree も作らないこと。"""
+        manager = make_manager(tmp_path)
+        monkeypatch.chdir(repo)
+        worktrees_before = _git_out(repo, "worktree", "list")
+
+        raised: Exception | None = None
+        try:
+            manager.create(NullProject(), FakeCard("X test"))
+        except Exception as e:  # noqa: BLE001 - 例外の種類は下でまとめて確かめる
+            raised = e
+
+        # どんな終わり方をしても、まず「実行場所のリポジトリが無傷か」を確かめる。
+        # 壊れたときに「未解決なのに cwd の git を触った」と分かる落ち方にするため
+        assert "chevuoi/" not in _git_out(repo, "branch", "--list")
+        assert _git_out(repo, "worktree", "list") == worktrees_before
+        assert isinstance(raised, ProjectNotResolvedError), f"想定外の終わり方: {raised!r}"
+
     def test_create_makes_worktree_with_derived_branch(self, tmp_path, repo):
         manager = make_manager(tmp_path)
         project = Project(tag=ProjectTag(value="X"), repo_path=repo)
