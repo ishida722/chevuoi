@@ -1,13 +1,16 @@
 import logging
 from pathlib import Path
 
+from chevuoi.application.services.project_resolver import ProjectResolver
+import pytest
+
 from chevuoi.application.usecases.gc_usecase import GcUsecase
 from chevuoi.application.usecases.issue_card_usecase import IssueCardUsecase
 from chevuoi.application.usecases.issue_proposals_usecase import IssueProposalsUsecase
 from chevuoi.application.usecases.process_card_usecase import ProcessCardUsecase
 from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
 from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
-from chevuoi.domain.entities.project import Project
+from chevuoi.domain.entities.project import NullProject, Project
 from chevuoi.domain.entities.routing_decision import RoutingDecision
 from chevuoi.domain.entities.task_proposal import TaskProposal
 from chevuoi.domain.entities.workflow_meta import ScanResult, WorkflowMeta
@@ -23,6 +26,7 @@ from tests.unit.fakes import (
     FakeCard,
     FakeCardIssuer,
     FakeExecutor,
+    FakeInspector,
     FakePublisher,
     FakeWorktreeManager,
 )
@@ -79,9 +83,10 @@ def make_usecase(
     executor = FakeExecutor(result, exc=exc)
     publisher = FakePublisher()
     config = make_config(projects)
-    proposals = IssueProposalsUsecase(IssueCardUsecase(issuer or FakeCardIssuer()), config)
+    proposals = IssueProposalsUsecase(IssueCardUsecase(issuer or FakeCardIssuer(), FakeInspector()), config)
     usecase = ProcessCardUsecase(
-        worktrees, selector, registry, executor, publisher, config, proposals
+        worktrees, selector, registry, executor, publisher, config, proposals,
+        ProjectResolver(config),
     )
     return usecase, worktrees, executor, publisher
 
@@ -115,6 +120,18 @@ class TestProcessCardUsecase:
         usecase.execute(card)
         assert publisher.calls == []
         assert card.comments[0].startswith("🤖 変更なし:") and card.moved_to_review
+
+    @pytest.mark.parametrize("changes", [False, True])
+    def test_workflow_probe_reports_the_same_worktree_fact_as_finalize(self, changes):
+        """ワークフローに渡される has_changes が、終端処理が「変更なし」判定に使うのと
+        同じ worktree の同じ事実を返すこと。
+
+        （終端の分岐そのものは test_pr_outcome_* が担保しているので、ここでは重ねない）
+        """
+        usecase, _, executor, _ = make_usecase(changes=changes)
+        usecase.execute(FakeCard("MIRAI 変更判定"))
+        probe = executor.calls[0]["has_changes"]
+        assert probe() is changes
 
     def test_comment_outcome_never_publishes(self):
         usecase, _, _, publisher = make_usecase(workflow="task")
@@ -200,6 +217,8 @@ class TestProcessCardUsecase:
         assert card.moved_to_review
 
     def test_tag_lookup_ignores_case(self):
+        """カードのタグ解決が ProjectResolver に委譲されていること
+        （大小文字が違っても設定のプロジェクトを引けること）。"""
         usecase, _, _, _ = make_usecase(projects={"wf": Path("/repo/wf")})
         project = usecase.resolve_project(FakeCard("Wf [dev]ドキュメント作成"))
         assert project.repo_path == Path("/repo/wf")
@@ -391,7 +410,7 @@ class TestProcessCardProposals:
 
     def test_evidence_goes_into_body_and_key_is_deterministic(self):
         issuer = FakeCardIssuer()
-        usecase = IssueCardUsecase(issuer)
+        usecase = IssueCardUsecase(issuer, FakeInspector())
         project = Project(tag=ProjectTag(value="MIRAI"), repo_path=Path("/r"))
         p = proposal("bug", body="本文", evidence=("src/a.py:1",))
         usecase.execute(p, project, parent=FakeCard("MIRAI 親"))
@@ -406,10 +425,40 @@ class TestProcessCardProposals:
         """リポジトリが未解決のプロジェクト（vuoi card issue のようにタグしか無い場合）でも
         タグ付きで起票できること。起票にリポジトリは要らない。"""
         issuer = FakeCardIssuer()
-        IssueCardUsecase(issuer).execute(
+        IssueCardUsecase(issuer, FakeInspector()).execute(
             proposal("cli"), Project(tag=ProjectTag(value="MIRAI"), repo_path=None)
         )
         assert issuer.requests[0].project_tag == ProjectTag(value="MIRAI")
+
+    def test_base_commit_is_recorded_at_issue_time(self):
+        """起票時に見ていたベースのコミットを発行要求に載せること
+        （後からトリアージが「その後この箇所は変わったか」を判定できる）。"""
+        issuer = FakeCardIssuer()
+        usecase = IssueCardUsecase(issuer, FakeInspector(base_commit="deadbeef"))
+        project = Project(tag=ProjectTag(value="MIRAI"), repo_path=Path("/r"))
+        usecase.execute(proposal("bug"), project)
+        assert issuer.requests[0].base_commit == "deadbeef"
+
+    def test_no_base_commit_for_an_unidentified_repository(self):
+        """プロジェクトを特定できないカードでは、ベースコミットを記録しないこと。
+
+        git はリポジトリ未指定だとカレントディレクトリで動くため、記録すると
+        無関係なリポジトリの SHA を指紋として埋め込んでしまう。
+        """
+        issuer = FakeCardIssuer()
+        inspector = FakeInspector(base_commit="deadbeef")
+        usecase = IssueCardUsecase(issuer, inspector)
+        usecase.execute(proposal("bug"), NullProject())
+        assert issuer.requests[0].base_commit == ""
+        assert inspector.base_commit_calls == []
+
+    def test_inspector_failure_does_not_stop_issuing(self):
+        """ベースコミットを取れなくても起票は止めず、指紋だけを空にすること。"""
+        issuer = FakeCardIssuer()
+        usecase = IssueCardUsecase(issuer, FakeInspector(error=RuntimeError("git 無し")))
+        project = Project(tag=ProjectTag(value="MIRAI"), repo_path=Path("/r"))
+        usecase.execute(proposal("bug"), project)
+        assert issuer.requests[0].base_commit == ""
 
 
 class TestGcUsecase:

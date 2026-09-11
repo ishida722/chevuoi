@@ -29,6 +29,8 @@ class Project(BaseModel):
     # 読み出しは下の repo_path プロパティへ集約する。構築・直列化のキーは repo_path のまま
     resolved_repo_path: Path | None = Field(alias="repo_path", serialization_alias="repo_path")
     test_commands: list[str] = []  # テストゲートの中身。有無・回数はワークフローが決める
+    # 差分・鮮度の基準にするブランチ。空なら実装側が origin/HEAD を解決する
+    base_ref: str = ""
 
     @field_validator("resolved_repo_path")
     @classmethod
@@ -62,7 +64,10 @@ class Project(BaseModel):
 
 
 class NullProject(Project):
-    """解決できなかったことを表す Null Object。処理側は is_null で判定する。"""
+    """解決できなかったことを表す Null Object。処理側は is_null で判定する。
 
-    def __init__(self) -> None:
-        super().__init__(tag=ProjectTag(value=""), repo_path=None)
+    引けなかったタグは保持する（起票のようにタグだけは使う処理があるため）。
+    """
+
+    def __init__(self, tag: ProjectTag | None = None) -> None:
+        super().__init__(tag=tag or ProjectTag(value=""), repo_path=None)

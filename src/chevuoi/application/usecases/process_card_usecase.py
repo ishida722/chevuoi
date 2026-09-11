@@ -4,12 +4,13 @@ import logging
 
 from injector import inject
 
+from chevuoi.application.services.project_resolver import ProjectResolver
 from chevuoi.application.usecases.issue_proposals_usecase import IssueProposalsUsecase
 from chevuoi.application.usecases.select_workflow_usecase import SelectWorkflowUsecase
 from chevuoi.application.usecases.workflow_registry import WorkflowRegistry
 from chevuoi.domain.entities.card import Card
 from chevuoi.domain.entities.issue_report import IssueReport
-from chevuoi.domain.entities.project import NullProject, Project
+from chevuoi.domain.entities.project import Project
 from chevuoi.domain.entities.worktree import Worktree
 from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
@@ -104,6 +105,7 @@ class ProcessCardUsecase:
         publisher: PullRequestPublisher,
         config: AppConfig,
         proposals: IssueProposalsUsecase,
+        projects: ProjectResolver,
     ) -> None:
         self.worktrees = worktrees
         self.selector = selector
@@ -112,6 +114,7 @@ class ProcessCardUsecase:
         self.publisher = publisher
         self.config = config
         self.proposals = proposals
+        self.projects = projects
 
     def execute(self, card: Card) -> None:
         if not card.claim():
@@ -160,7 +163,13 @@ class ProcessCardUsecase:
             workflow = self.registry.get(meta.name)
             logger.info("ワークフロー実行開始: %s (%s)", card.name, meta.name)
             result = self.executor.execute(
-                workflow, self.build_message(card), workdir=worktree.path, project=project
+                workflow,
+                self.build_message(card),
+                workdir=worktree.path,
+                project=project,
+                # 終端処理（finalize）が「変更なし」に使うのと同じ判定を渡す。
+                # ワークフローが自前で git を叩くと判定条件がずれるため
+                has_changes=lambda: self.worktrees.has_changes(worktree),
             )
             logger.info("ワークフロー実行終了: %s (blocked=%s)", card.name, bool(result.blocked))
             # 終端状態に関わらず起票する（blocked でも踏んだバグは実在する）。例外は出さない
@@ -234,17 +243,4 @@ class ProcessCardUsecase:
 
         解決できない場合は NullProject を返す。
         """
-        tag = card.project_tag
-        if tag is None:
-            return NullProject()
-        entry = self.config.projects.get(tag.value)
-        if entry is None:
-            # タグの大文字小文字は無視する（例: "Wf" と "wf" を同一視）
-            wanted = tag.value.casefold()
-            entry = next(
-                (cfg for key, cfg in self.config.projects.items() if key.casefold() == wanted),
-                None,
-            )
-        if entry is None:
-            return NullProject()
-        return Project(tag=tag, repo_path=entry.path, test_commands=list(entry.test_commands))
+        return self.projects.resolve(card.project_tag)

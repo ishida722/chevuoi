@@ -15,7 +15,7 @@ from chevuoi.infrastructure.config.settings import AppConfig, ProjectConfig, Tre
 from chevuoi.domain.services.repository_name import normalize_repo
 from chevuoi.infrastructure.git.gh_review_request_provider import GhReviewRequestProvider
 from chevuoi.infrastructure.git.git_repository_locator import parse_repo_slug
-from tests.unit.fakes import FakeCardIssuer
+from tests.unit.fakes import FakeCardIssuer, FakeInspector
 
 
 def make_config(projects: dict[str, ProjectConfig] | None = None) -> AppConfig:
@@ -63,15 +63,34 @@ class FakeLocator(RepositoryLocator):
         return self.by_path.get(str(path))
 
 
-def make_usecase(requests, projects=None, locator=None, issuer=None):
+def make_usecase(requests, projects=None, locator=None, issuer=None, inspector=None):
     issuer = issuer or FakeCardIssuer()
     usecase = IssueReviewRequestsUsecase(
         FakeProvider(requests),
         locator or FakeLocator(),
-        IssueCardUsecase(issuer),
+        IssueCardUsecase(issuer, inspector or FakeInspector()),
         make_config(projects),
     )
     return usecase, issuer
+
+
+class TestBaseRef:
+    def test_configured_base_ref_reaches_the_issued_card(self):
+        """設定した base_ref が、起票時の指紋取得に使う Project に載ること
+        （既定以外のベースブランチを使うプロジェクトで指紋がずれない）。"""
+        inspector = FakeInspector(base_commit="deadbeef")
+        usecase, issuer = make_usecase(
+            [request()],
+            projects={
+                "VUOI": ProjectConfig(
+                    path=Path("/r"), repo="ishida722/vuoi", base_ref="origin/release"
+                )
+            },
+            inspector=inspector,
+        )
+        usecase.execute()
+        assert [p.base_ref for p in inspector.base_commit_calls] == ["origin/release"]
+        assert issuer.requests[0].base_commit == "deadbeef"
 
 
 class TestReviewRequest:
@@ -145,7 +164,7 @@ class TestIssueReviewRequestsUsecase:
     def test_hitting_the_limit_is_warned(self, caplog):
         provider = FakeProvider([request(number=n) for n in range(3)])
         usecase = IssueReviewRequestsUsecase(
-            provider, FakeLocator(), IssueCardUsecase(FakeCardIssuer()), make_config()
+            provider, FakeLocator(), IssueCardUsecase(FakeCardIssuer(), FakeInspector()), make_config()
         )
         with caplog.at_level(logging.WARNING):
             usecase.execute(limit=2)
@@ -194,7 +213,7 @@ class TestIssueReviewRequestsUsecase:
         usecase = IssueReviewRequestsUsecase(
             FakeProvider([], exc=ReviewRequestError("gh 失敗")),
             FakeLocator(),
-            IssueCardUsecase(FakeCardIssuer()),
+            IssueCardUsecase(FakeCardIssuer(), FakeInspector()),
             make_config(),
         )
         with pytest.raises(ReviewRequestError):
@@ -203,7 +222,7 @@ class TestIssueReviewRequestsUsecase:
     def test_limit_is_passed_to_the_provider(self):
         provider = FakeProvider([request(number=n) for n in range(5)])
         usecase = IssueReviewRequestsUsecase(
-            provider, FakeLocator(), IssueCardUsecase(FakeCardIssuer()), make_config()
+            provider, FakeLocator(), IssueCardUsecase(FakeCardIssuer(), FakeInspector()), make_config()
         )
         assert len(usecase.execute(limit=2).issued) == 2
         assert provider.limits == [2]

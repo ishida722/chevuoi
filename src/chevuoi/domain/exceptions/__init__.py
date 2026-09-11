@@ -36,3 +36,7 @@ class WorkflowNotFound(WorkflowError):
 
 class AmbiguousSelection(WorkflowError):
     """候補が 1 件に定まらない。silent fallback はしない（仕様 §7）。"""
+
+
+class TriageError(ChevuoiError):
+    """トリアージ対象カードの取得・更新に失敗した（Inbox 未設定・API エラーなど）。"""
