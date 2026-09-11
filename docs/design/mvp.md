@@ -121,15 +121,25 @@ class Card(ABC):
 class Project(BaseModel):
     """タグに紐付くプロジェクトフォルダ。"""
     tag: ProjectTag
-    repo_path: Path            # 対応表から引いたリポジトリのパス
+    # 既定値は置かない（渡し忘れを黙って未解決にしない）。相対パスは validator で弾く
+    resolved_repo_path: Path | None = Field(alias="repo_path")
+
+    @property
+    def repo_path(self) -> Path:
+        # 未解決なら例外。Path("") は Path(".") と同値になり、判定漏れのまま
+        # 実行場所のリポジトリを触ってしまうため、既定値に落とさない
+        if self.resolved_repo_path is None:
+            raise ProjectNotResolvedError(...)
+        return self.resolved_repo_path
 
     @property
     def is_null(self) -> bool:
-        return False
+        # 「repo_path を読めるか」と同義。判定はこれ 1 つで済む
+        return self.resolved_repo_path is None
 
 
 class NullProject(Project):
-    """解決できなかったことを表す Null Object。処理側は is_null で判定する。"""
+    """解決できなかったことを表す Null Object（repo_path=None）。"""
 
 
 class Worktree(BaseModel):

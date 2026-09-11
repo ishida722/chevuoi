@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
 
+import pytest
+
 from vuoi_sdk import (
     END,
     PROPOSAL_PROMPT,
@@ -12,6 +14,7 @@ from vuoi_sdk import (
     Runner,
     StateGraph,
     WorkflowContext,
+    bind_has_changes,
     bind_project,
     bind_proposals,
     bind_workdir,
@@ -73,6 +76,92 @@ def test_executor_binds_project_for_workflow():
         name="MIRAI", path=Path("/repo/mirai"), test_commands=("make test",)
     )
     assert ctx.project is None
+
+
+class TestHasChanges:
+    """ctx.has_changes() は「ホストが終端処理で『変更なし』とするか」と同じ事実を返す。"""
+
+    def test_outside_binding_is_treated_as_changed_with_warning(self, caplog):
+        """判定が束縛されていない実行では、例外にせず警告を出して「変更あり」になること。
+
+        False に倒すと、成果がある回をワークフローが「変更なし」と誤って扱いうる。
+        """
+        ctx = make_ctx()
+        with caplog.at_level(logging.WARNING, logger="vuoi_sdk"):
+            assert ctx.has_changes() is True
+        # 文言ではなく「警告として記録されたこと」を見る（言い換えで落とさない）
+        assert [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    def test_binding_does_not_leak_after_exit(self):
+        """束縛を抜けたあとは、束縛外の振る舞い（変更あり扱い）に戻ること。"""
+        ctx = make_ctx()
+        with bind_has_changes(lambda: False):
+            assert ctx.has_changes() is False
+        assert ctx.has_changes() is True
+
+    def test_is_evaluated_on_every_call(self):
+        """判定は呼ぶたびに評価されること（キャッシュしない）。
+
+        ノードが変更を加える前後で答えが変わるので、初回の結果を固定してはならない。
+        """
+        ctx = make_ctx()
+        answers = iter([False, True])
+        with bind_has_changes(lambda: next(answers)):
+            assert ctx.has_changes() is False
+            assert ctx.has_changes() is True
+
+    def test_probe_failure_propagates(self):
+        """判定そのものが失敗したときは、握りつぶさず例外を伝播すること。
+
+        「判定できない」を黙って「変更なし」に倒すと成果を捨てる。
+        """
+        def broken() -> bool:
+            raise RuntimeError("ベースブランチを解決できませんでした")
+
+        ctx = make_ctx()
+        with bind_has_changes(broken), pytest.raises(RuntimeError):
+            ctx.has_changes()
+
+
+def _run_probing_workflow(ctx: WorkflowContext, seen: dict, **execute_kwargs) -> None:
+    """ノードから ctx.has_changes() を 1 回読むだけのグラフを executor 経由で回す。"""
+
+    class State(BaseState):
+        pass
+
+    def probe(state: State):
+        seen["has_changes"] = ctx.has_changes()
+        return {}
+
+    g = StateGraph(State)
+    g.add_node("probe", probe)
+    g.add_edge(START, "probe")
+    g.add_edge("probe", END)
+    workflow = LoadedWorkflow(name="probe", graph=g.compile())
+    LangGraphExecutor().execute(workflow, "hi", **execute_kwargs)
+
+
+def test_executor_binds_has_changes_for_workflow():
+    """executor に渡した判定が、グラフのノードから ctx.has_changes() として見え、
+    実行が終われば束縛が解除されること。"""
+    ctx = make_ctx()
+    seen: dict = {}
+    _run_probing_workflow(ctx, seen, has_changes=lambda: False)
+    assert seen["has_changes"] is False
+    assert ctx.has_changes() is True  # 束縛は実行外へ漏れない
+
+
+def test_workflow_sees_changes_when_executor_gets_no_probe():
+    """判定を渡さない実行（vuoi workflow run など、対象の worktree が無い実行）では、
+    ノードが「変更あり」を見ること。
+
+    ここで「変更なし」を見せると、ワークフローが成果のある回をレビューや要約ごと
+    飛ばしうる。
+    """
+    ctx = make_ctx()
+    seen: dict = {}
+    _run_probing_workflow(ctx, seen)
+    assert seen["has_changes"] is True
 
 
 class TestPropose:

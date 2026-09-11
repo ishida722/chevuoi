@@ -28,6 +28,9 @@ class CardIssueRequest(BaseModel):
     parent: CardId | None = None
     parent_url: str = ""
     search_scope: SearchScope = "inbox"  # 同キーの既存カードを探す範囲
+    # 起票時に見ていたベースのコミット SHA。後から「その後この箇所は変わったか」を
+    # 機械的に判定するための指紋（解決できなければ空文字）
+    base_commit: str = ""
 
 
 class CardIssuer(ABC):

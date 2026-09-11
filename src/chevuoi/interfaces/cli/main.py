@@ -18,7 +18,7 @@ from chevuoi.application.usecases.run_usecase import RunUsecase
 from chevuoi.domain.exceptions import ChevuoiError
 from chevuoi.infrastructure.config.settings import load_config
 from chevuoi.interface.di_modules import AppModule
-from chevuoi.interfaces.cli.commands import card, workflow
+from chevuoi.interfaces.cli.commands import card, triage, workflow
 from chevuoi.interfaces.cli.context import get_injector
 
 DEFAULT_CONFIG = Path.home() / ".config" / "vuoi" / "config.toml"
@@ -34,6 +34,7 @@ app = typer.Typer(
 )
 app.add_typer(workflow.app, name="workflow")
 app.add_typer(card.app, name="card")
+app.command("triage", help="Inbox のカードを集約・畳み込み・ラベル付けする")(triage.triage)
 
 
 def setup_file_logging(log_file: Path) -> None:

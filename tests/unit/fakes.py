@@ -10,6 +10,7 @@ from chevuoi.domain.exceptions import CardIssueError
 from chevuoi.domain.ports.card_issuer import CardIssueRequest, CardIssuer, SearchScope
 from chevuoi.domain.ports.graph_executor import ExecutionResult, GraphExecutor
 from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
+from chevuoi.domain.ports.repository_inspector import RepositoryInspector
 from chevuoi.domain.ports.workflow_loader import LoadedWorkflow
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.domain.value_objects.branch_name import BranchName
@@ -27,9 +28,7 @@ def make_config(**overrides) -> AppConfig:
             in_progress_list_id="p",
             in_review_list_id="v",
         ),
-        projects={},
-        worktree_root="/tmp",
-        **overrides,
+        **{"projects": {}, "worktree_root": "/tmp", **overrides},
     )
 
 
@@ -120,14 +119,17 @@ class FakeWorktreeManager(WorktreeManager):
         self.removed: list[Worktree] = []
         self.finished: list[Worktree] = []
         self.changes = True
+        self.handed_out: list[Worktree] = []
 
     def create(self, project: Project, card: Card) -> Worktree:
         self.created.append((project, card))
-        return Worktree(
+        worktree = Worktree(
             path=Path("/tmp/wt"),
             branch=BranchName.from_card_id(card.id),
             repo_path=project.repo_path,
         )
+        self.handed_out.append(worktree)
+        return worktree
 
     def list_stale(self, older_than_days: int) -> list[Worktree]:
         return self.finished
@@ -136,6 +138,14 @@ class FakeWorktreeManager(WorktreeManager):
         self.removed.append(worktree)
 
     def has_changes(self, worktree: Worktree) -> bool:
+        """実物の git と同じく、問い合わせた worktree の事実を返す。
+
+        引数を無視して定数を返すと、ホストが「別の worktree の事実」を見ている誤りを
+        テストが素通しする。この fake が知っているのは create で払い出した worktree
+        だけなので、それ以外を問い合わせたら答えずに落とす。
+        """
+        if worktree not in self.handed_out:
+            raise AssertionError(f"払い出していない worktree への問い合わせ: {worktree.path}")
         return self.changes
 
 
@@ -146,12 +156,24 @@ class FakeExecutor(GraphExecutor):
         self.calls: list[dict] = []
 
     def execute(
-        self, workflow: LoadedWorkflow, message: str, *, workdir=None, project=None
+        self,
+        workflow: LoadedWorkflow,
+        message: str,
+        *,
+        workdir=None,
+        project=None,
+        has_changes=None,
     ) -> ExecutionResult:
         if self.exc is not None:
             raise self.exc
         self.calls.append(
-            {"workflow": workflow, "message": message, "workdir": workdir, "project": project}
+            {
+                "workflow": workflow,
+                "message": message,
+                "workdir": workdir,
+                "project": project,
+                "has_changes": has_changes,
+            }
         )
         return self.result
 
@@ -164,3 +186,50 @@ class FakePublisher(PullRequestPublisher):
     def publish(self, worktree: Worktree, *, title: str, body: str) -> str:
         self.calls.append({"worktree": worktree, "title": title, "body": body})
         return self.url
+
+
+class FakeInspector(RepositoryInspector):
+    """git を触らないインスペクタ。プロセス境界（git）だけを差し替える。
+
+    問い合わせを記録するので、「呼ばれなかったこと」も検証できる。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_commit: str = "base0",
+        missing_paths: tuple[str, ...] = (),
+        changed_paths: tuple[str, ...] = (),
+        refreshed: bool = True,
+        checkout: Path | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._base_commit = base_commit
+        self._missing = set(missing_paths)
+        self._changed = set(changed_paths)
+        self._refreshed = refreshed
+        self._checkout = checkout or Path("/tmp/triage-base")
+        self._error = error
+        self.refreshed: list[Project] = []
+        self.checkouts: list[Project] = []
+        self.base_commit_calls: list[Project] = []
+
+    def refresh(self, project: Project) -> bool:
+        self.refreshed.append(project)
+        return self._refreshed
+
+    def base_commit(self, project: Project) -> str:
+        self.base_commit_calls.append(project)
+        if self._error is not None:
+            raise self._error
+        return self._base_commit
+
+    def path_exists(self, project: Project, path: str) -> bool:
+        return path not in self._missing
+
+    def changed_since(self, project: Project, path: str, since: str) -> bool:
+        return path in self._changed
+
+    def base_checkout(self, project: Project) -> Path:
+        self.checkouts.append(project)
+        return self._checkout

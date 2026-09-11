@@ -1,11 +1,59 @@
+from pathlib import Path
+
 import pytest
+from pydantic import ValidationError
 
 from chevuoi.domain.entities.issue_report import IssuedCard, IssueReport
+from chevuoi.domain.entities.project import NullProject, Project
 from chevuoi.domain.entities.task_proposal import TaskProposal
+from chevuoi.domain.exceptions import ProjectNotResolvedError
 from chevuoi.domain.services.proposal_policy import select_proposals
 from chevuoi.domain.value_objects.branch_name import BranchName
 from chevuoi.domain.value_objects.card_id import CardId
 from chevuoi.domain.value_objects.project_tag import ProjectTag
+
+
+class TestProject:
+    @pytest.mark.parametrize(
+        "project",
+        [NullProject(), Project(tag=ProjectTag(value="MIRAI"), repo_path=None)],
+        ids=["null_project", "repo_path_none"],
+    )
+    def test_unresolved_repo_path_raises_instead_of_pointing_at_cwd(self, project):
+        """リポジトリが未解決のプロジェクトの repo_path を読むと例外になること。
+
+        Path("") や Path(".") のような「カレントディレクトリと同値のパス」を返すと、
+        is_null の判定を忘れた利用者が実行場所のリポジトリを触ってしまうため。
+        """
+        with pytest.raises(ProjectNotResolvedError):
+            _ = project.repo_path
+
+    def test_is_null_answers_whether_repo_path_is_usable(self):
+        """is_null が「repo_path を読めるか」と一致すること。
+
+        is_null=False なら必ず repo_path を読めること。is_null で判定してから
+        repo_path を使うコード（唯一のガード）が、その判定を信じられるため。
+        """
+        resolved = Project(tag=ProjectTag(value="MIRAI"), repo_path=Path("/repo/mirai"))
+        assert resolved.is_null is False
+        assert resolved.repo_path == Path("/repo/mirai")
+        assert NullProject().is_null is True
+        assert Project(tag=ProjectTag(value="MIRAI"), repo_path=None).is_null is True
+
+    def test_repo_path_must_be_passed_explicitly(self):
+        """repo_path の渡し忘れは構築時に落ちること（黙って未解決にしない）。"""
+        with pytest.raises(ValidationError):
+            Project(tag=ProjectTag(value="MIRAI"))
+
+    @pytest.mark.parametrize("relative", [Path(""), Path("."), Path("repo/mirai")])
+    def test_relative_repo_path_is_rejected(self, relative):
+        """実行場所に依存する相対パスは構築時に落ちること。
+
+        Path("") は Path(".") と同値で、未解決のつもりの値が cwd のリポジトリを
+        指してしまうため（設定に相対パスを書いた場合も同じ）。
+        """
+        with pytest.raises(ValidationError):
+            Project(tag=ProjectTag(value="MIRAI"), repo_path=relative)
 
 
 class TestProjectTag:

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from urllib.parse import parse_qsl
@@ -6,7 +7,7 @@ import httpx
 
 import pytest
 
-from chevuoi.domain.exceptions import CardIssueError
+from chevuoi.domain.exceptions import CardIssueError, TriageError
 from chevuoi.domain.ports.card_issuer import CardIssueRequest
 from chevuoi.domain.value_objects.card_id import CardId
 from chevuoi.domain.value_objects.project_tag import ProjectTag
@@ -15,6 +16,7 @@ from chevuoi.infrastructure.trello.client import TrelloClient
 from chevuoi.infrastructure.trello.trello_card import TrelloCard
 from chevuoi.infrastructure.trello.trello_card_issuer import TrelloCardIssuer
 from chevuoi.infrastructure.trello.trello_card_provider import TrelloCardProvider
+from chevuoi.infrastructure.trello.trello_triage_repository import TrelloTriageRepository
 
 
 def make_config(inbox: str | None = "inbox") -> AppConfig:
@@ -271,3 +273,174 @@ class TestTrelloCardIssuer:
         issuer = TrelloCardIssuer(TrelloClient(config, transport=httpx.MockTransport(handler)), config)
         with pytest.raises(CardIssueError, match="Inbox"):
             issuer.issue(make_request())
+
+
+class MockTriageBoard:
+    """トリアージが叩く範囲（Inbox 一覧・コメント・ラベル・アーカイブ）の最小サーバ。"""
+
+    def __init__(self, cards: list[dict] | None = None, labels: list[dict] | None = None) -> None:
+        self.cards = cards if cards is not None else []
+        self.labels = labels if labels is not None else []
+        self.requests: list[httpx.Request] = []
+        self.card_labels: dict[str, list[str]] = {}
+        self.comments: list[tuple[str, str]] = []
+        self.closed: list[str] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        path, method = request.url.path, request.method
+        if path == "/1/lists/inbox/cards":
+            return httpx.Response(200, json=self.cards)
+        if path == "/1/lists/inbox":
+            return httpx.Response(200, json={"idBoard": "board1"})
+        if path == "/1/boards/board1/labels":
+            return httpx.Response(200, json=self.labels)
+        if path == "/1/labels" and method == "POST":
+            form = _form(request)
+            label = {"id": f"lbl{len(self.labels) + 1}", "name": form["name"]}
+            self.labels.append(label)
+            return httpx.Response(200, json=label)
+        if path.endswith("/actions/comments") and method == "POST":
+            self.comments.append((path.split("/")[3], _form(request)["text"]))
+            return httpx.Response(200, json={})
+        if path.endswith("/idLabels") and method == "POST":
+            self.card_labels.setdefault(path.split("/")[3], []).append(_form(request)["value"])
+            return httpx.Response(200, json={})
+        if path.startswith("/1/cards/") and method == "GET":
+            short = path.split("/")[3]
+            return httpx.Response(200, json={"idLabels": self.card_labels.get(short, [])})
+        if path.startswith("/1/cards/") and method == "PUT":
+            form = _form(request)
+            if form.get("closed") == "true":
+                self.closed.append(path.split("/")[3])
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self.handler)
+
+
+def triage_card_json(short: str, *, name: str, desc: str, card_id: str = "6a9615800000000000000000"):
+    return {"id": card_id, "shortLink": short, "name": name, "desc": desc,
+            "url": f"https://trello.com/c/{short}", "labels": []}
+
+
+def make_triage_repo(server: MockTriageBoard, inbox: str | None = "inbox") -> TrelloTriageRepository:
+    config = make_config(inbox)
+    return TrelloTriageRepository(TrelloClient(config, transport=server.transport()), config)
+
+
+class TestTrelloTriageRepository:
+    def test_missing_inbox_raises_triage_error(self):
+        """Inbox リストが未設定のとき、トリアージを黙って続けずエラーにすること。"""
+        with pytest.raises(TriageError):
+            make_triage_repo(MockTriageBoard(), inbox=None).fetch_open()
+
+    def test_api_error_becomes_triage_error(self):
+        """Trello API が失敗したとき、認証情報を含まないドメイン例外に変換すること
+        （メッセージはログにも標準エラーにも出るため、key/token を混ぜない）。"""
+        config = AppConfig(
+            trello=TrelloConfig(
+                api_key="SECRET-KEY", api_token="SECRET-TOKEN",
+                ready_list_id="ready", in_progress_list_id="doing", in_review_list_id="review",
+                inbox_list_id="missing",
+            ),
+            projects={},
+            worktree_root=Path("/tmp/worktrees"),
+        )
+        server = MockTriageBoard()
+        repo = TrelloTriageRepository(TrelloClient(config, transport=server.transport()), config)
+        with pytest.raises(TriageError) as e:
+            repo.fetch_open()
+        assert "SECRET-KEY" not in str(e.value) and "SECRET-TOKEN" not in str(e.value)
+
+    def test_footer_tells_auto_issued_cards_from_human_ones(self):
+        """フッターを持つカードだけを自動起票として読むこと（人間のカードを畳まない）。"""
+        server = MockTriageBoard([
+            triage_card_json("AUTO", name="MIRAI 落ちる",
+                             desc="本文\n\n---\nvuoi: key=abc123 generation=1 kind=bug base=deadbeef"),
+            triage_card_json("HUMAN", name="MIRAI 手で書いた", desc="本文だけ"),
+        ])
+        cards = {c.id.external_id: c for c in make_triage_repo(server).fetch_open()}
+        assert cards["AUTO"].is_auto_issued and cards["AUTO"].key == "abc123"
+        assert cards["AUTO"].base_commit == "deadbeef" and cards["AUTO"].kind == "bug"
+        assert cards["HUMAN"].is_auto_issued is False
+
+    def test_created_at_comes_from_the_card_id(self):
+        """作成時刻をカード ID 先頭 8 桁（Unix 秒）から導出すること（API を増やさない）。"""
+        server = MockTriageBoard([
+            triage_card_json("A", name="MIRAI x", desc="vuoi: key=k",
+                             card_id="6a9615800000000000000000")
+        ])
+        assert make_triage_repo(server).fetch_open()[0].created_at == datetime(
+            2026, 9, 1, tzinfo=UTC
+        )
+
+    def test_unreadable_card_id_is_treated_as_just_created(self):
+        """作成時刻を導出できないカードは「たった今作られた」として扱うこと。
+
+        settle の目的は起票直後のカードを触らないことなので、時刻が分からない場合は
+        触らない側に倒す（古い側に倒すと、素性の分からないカードが即座に
+        アーカイブ候補になる）。
+        """
+        server = MockTriageBoard([
+            triage_card_json("A", name="MIRAI x", desc="vuoi: key=k", card_id="not-an-objectid")
+        ])
+        created = make_triage_repo(server).fetch_open()[0].created_at
+        assert 0 <= (datetime.now(UTC) - created).total_seconds() < 60
+
+    def test_cards_are_returned_oldest_first(self):
+        """カードは作成順（昇順）で返ること（代表の選出が入力順に依存しない）。"""
+        server = MockTriageBoard([
+            triage_card_json("NEW", name="MIRAI x", desc="vuoi: key=k",
+                             card_id="6a9615810000000000000000"),
+            triage_card_json("OLD", name="MIRAI y", desc="vuoi: key=k",
+                             card_id="6a9615800000000000000000"),
+        ])
+        assert [c.id.external_id for c in make_triage_repo(server).fetch_open()] == ["OLD", "NEW"]
+
+    def test_evidence_is_restored_from_the_body(self):
+        """本文の「根拠:」節から evidence を復元すること（起票時の書式の逆）。"""
+        desc = "説明\n\n根拠:\n- src/foo.py:12\n- src/bar.py\n\n---\nvuoi: key=k"
+        server = MockTriageBoard([triage_card_json("A", name="MIRAI x", desc=desc)])
+        assert make_triage_repo(server).fetch_open()[0].evidence == (
+            "src/foo.py:12", "src/bar.py"
+        )
+
+    def test_archive_closes_the_card_instead_of_deleting_it(self):
+        """アーカイブは可逆な closed=true で行い、カードを削除しないこと。"""
+        server = MockTriageBoard()
+        make_triage_repo(server).archive(CardId(source="trello", external_id="A"))
+        assert server.closed == ["A"]
+        assert all(r.method != "DELETE" for r in server.requests)
+
+    def test_label_is_created_once_and_not_added_twice(self):
+        """同じラベルを 2 回付けても、ラベル作成も付与も 1 回で済むこと（冪等）。"""
+        server = MockTriageBoard()
+        repo = make_triage_repo(server)
+        card_id = CardId(source="trello", external_id="A")
+        repo.add_label(card_id, "triage/review")
+        repo.add_label(card_id, "triage/review")
+        assert server.card_labels == {"A": ["lbl1"]}
+        assert len([r for r in server.requests if r.url.path == "/1/labels"]) == 1
+
+    def test_existing_label_is_reused(self):
+        """ボードに同名のラベルが既にあるとき、新しく作らずそれを使うこと。"""
+        server = MockTriageBoard(labels=[{"id": "lblX", "name": "triage/review"}])
+        make_triage_repo(server).add_label(CardId(source="trello", external_id="A"), "triage/review")
+        assert server.card_labels == {"A": ["lblX"]}
+        assert not [r for r in server.requests if r.url.path == "/1/labels"]
+
+    def test_base_commit_round_trips_from_issuing_to_triage(self):
+        """起票時に記録したベースコミットを、トリアージ側が読めること（フッターの往復）。"""
+        server = MockTrello()
+        config = make_config()
+        client = TrelloClient(config, transport=server.transport())
+        TrelloCardIssuer(client, config).issue(
+            CardIssueRequest(
+                title="落ちる", body="説明", project_tag=ProjectTag(value="MIRAI"),
+                idempotency_key="k1", base_commit="deadbeef",
+            )
+        )
+        board = MockTriageBoard([{**server.inbox[0], "labels": []}])
+        assert make_triage_repo(board).fetch_open()[0].base_commit == "deadbeef"

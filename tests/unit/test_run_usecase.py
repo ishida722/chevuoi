@@ -6,9 +6,12 @@ from injector import Injector
 from chevuoi.application.usecases.gc_usecase import GcUsecase
 from chevuoi.application.usecases.process_card_usecase import ProcessCardUsecase
 from chevuoi.application.usecases.run_usecase import RunUsecase
+from chevuoi.application.usecases.triage_usecase import TriageUsecase
 from chevuoi.domain.entities.card import Card
 from chevuoi.domain.ports.card_provider import CardProvider
-from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig
+from chevuoi.domain.ports.similarity_strategy import SimilarityStrategy
+from chevuoi.infrastructure.config.settings import AppConfig, TrelloConfig, TriageConfig
+from chevuoi.infrastructure.strategies.trigram_similarity import TrigramSimilarity
 from chevuoi.infrastructure.trello.client import TrelloClient
 from chevuoi.interface.di_modules import AppModule
 from tests.unit.fakes import FakeCard
@@ -135,3 +138,16 @@ class TestDiWiring:
         # transport が DI で誤注入されると全リクエストが失敗するため、None を確認する
         client = injector.get(TrelloClient)
         assert client._client._transport.__class__.__name__ == "HTTPTransport"
+
+    def test_injector_resolves_triage_with_the_configured_similarity(self):
+        """設定に書いた類似度の実装が DI で解決され、TriageUsecase が組み立つこと。"""
+        config = AppConfig(
+            trello=TrelloConfig(api_key="k", api_token="t", ready_list_id="r",
+                                in_progress_list_id="d", in_review_list_id="v"),
+            projects={},
+            worktree_root=Path("/tmp/wt"),
+            triage=TriageConfig(similarity="trigram"),
+        )
+        injector = Injector([AppModule(config)])
+        assert injector.get(TriageUsecase)
+        assert isinstance(injector.get(SimilarityStrategy), TrigramSimilarity)

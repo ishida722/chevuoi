@@ -10,6 +10,10 @@ class ProjectNotFoundError(ChevuoiError):
     """タグに対応するプロジェクトが対応表に無い。"""
 
 
+class ProjectNotResolvedError(ChevuoiError):
+    """未解決のプロジェクトのリポジトリを参照しようとした（is_null の判定漏れ）。"""
+
+
 class WorktreeError(ChevuoiError):
     """git worktree の操作に失敗した。"""
 
@@ -32,3 +36,7 @@ class WorkflowNotFound(WorkflowError):
 
 class AmbiguousSelection(WorkflowError):
     """候補が 1 件に定まらない。silent fallback はしない（仕様 §7）。"""
+
+
+class TriageError(ChevuoiError):
+    """トリアージ対象カードの取得・更新に失敗した（Inbox 未設定・API エラーなど）。"""

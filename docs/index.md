@@ -13,6 +13,7 @@ spec/mvp
 spec/workflow
 spec/task-sources
 spec/triage
+spec/inbox-triage
 spec/routes
 spec/gate-review
 spec/outcomes

@@ -206,6 +206,8 @@ class WorkflowContext:
     @property
     def project(self) -> ProjectInfo | None: ...   # 対象プロジェクト（ホストが束縛）
 
+    def has_changes(self) -> bool: ...   # 成果となる変更があるか（ホストが束縛）
+
     def propose(self, title: str, *, body: str = "", kind: str = "chore",
                 evidence: Sequence[str] = ()) -> None: ...   # 追加タスクを申告
 
@@ -213,8 +215,8 @@ class WorkflowContext:
 
 
 __all__ = ["API_VERSION", "PROPOSAL_PROMPT", "BaseState", "ProjectInfo", "Proposal",
-           "RunResult", "Runner", "WorkflowContext", "bind_project", "bind_proposals",
-           "bind_workdir", "StateGraph", "START", "END"]
+           "RunResult", "Runner", "WorkflowContext", "bind_has_changes", "bind_project",
+           "bind_proposals", "bind_workdir", "StateGraph", "START", "END"]
 ```
 
 `WorkflowContext` は dataclass なので、フィールドの**追加**は既存ワークフローを壊しません。
@@ -227,6 +229,7 @@ __all__ = ["API_VERSION", "PROPOSAL_PROMPT", "BaseState", "ProjectInfo", "Propos
 - **`llm`**: 軽い 1 発呼び出し（分類・要約・構造化出力）向け。設定に `[llm]` が無ければ `None` になり、runner だけで完結するワークフローは `[llm]` なしで動く
 - **`workdir`**: この実行の作業ディレクトリ。`vuoi run` ではカードの worktree、`vuoi workflow run` では実行ディレクトリ。`ctx.runner.run(cwd=ctx.workdir)` や subprocess の `cwd` に渡す。ホストが実行ごとに束縛する（ContextVar）ので、並列実行でも混ざらず、コンパイル済みグラフのキャッシュも保てる
 - **`project`**: 対象プロジェクトの情報。`vuoi run` ではカードのタグで解決したプロジェクト、`vuoi workflow run` など対象が無い実行では `None`。**ゲートの中身（`test_commands`）はプロジェクトが持ち、ゲートを置くか・何回試すかはワークフローが決める**（{doc}`routes`）。ゲート有りのワークフローは未設定時に通過扱いにせず `blocked` で止める
+- **`has_changes()`**: 作業ツリーに成果となる変更があるか。ホストが終端処理で「変更なし」（PR を作らない）と判定するのと**同じ事実**を返す。未コミットの変更（追跡外ファイル含む）に加え、ベースブランチとの差分＝コミット済みの成果も含む。差分ゼロの回にレビューや要約を走らせない、といった分岐に使う。`git` を自前で叩くとホストの判定条件とずれるので、この値に一本化する。呼ぶたびに評価する（キャッシュしない）ので、ノードが変更を加えた前後で答えは変わる。判定できない場合（ベースブランチを解決できない等）は例外が伝播する（「判定できない」を黙って「変更なし」に倒すと成果を捨てるため）。ホストの束縛外（`vuoi workflow run` など対象の worktree が無い実行）では警告を出して `True` を返す
 - **`propose(title, *, body, kind, evidence)`**: 作業中に見つけた範囲外の問題を追加タスクとして申告する（{doc}`proposals`）。任意のノード・ヘルパー関数から呼べる。起票するか・どこへ・何件まではホストが決め、`vuoi run` では終端状態に関わらずラン終了時に Inbox へ起票して結果を親カードにコメントする。`vuoi workflow run` では起票せず申告内容を表示するだけ。ホストの束縛外（自前のスレッドプール内など）で呼ぶと警告ログを出して捨てる
 - **`propose_from_output(text)`**: runner の出力から ```` ```vuoi-proposal ```` ブロック（JSON: `title` 必須、`kind` / `evidence` / `body` 任意）を抜き出して `propose` する。申告した件数を返す。壊れた JSON や `title` の無いブロックは警告して読み飛ばす。プロンプトには `PROPOSAL_PROMPT` を連結して LLM に形式を指示する
 - **推奨 state キー**: ホストの終端処理は最終 state の `blocked`（空でなければ撤退理由）と `result`（人間向け要約。PR 本文・カードコメントに使われる）を読む
