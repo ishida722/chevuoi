@@ -55,10 +55,15 @@ def card(
 class FakeTriageRepo(TriageCardRepository):
     """カードの集合をインメモリで持つリポジトリ。外部作用を記録する。"""
 
-    def __init__(self, cards: list[TriageCard], *, existing_comments: dict[str, str] | None = None,
+    def __init__(self, cards: list[TriageCard], *,
+                 existing_comments: dict[str, list[str]] | None = None,
                  archive_errors: tuple[str, ...] = ()) -> None:
         self.cards = cards
-        self.comments: dict[str, list[str]] = {k: [v] for k, v in (existing_comments or {}).items()}
+        # 前のランのコメント履歴をそのまま渡せるようにする（実物の Trello では畳まれる側の
+        # コメントも残るので、代表のぶんだけを引き継ぐフェイクは現実より甘くなる）
+        self.comments: dict[str, list[str]] = {
+            k: list(v) for k, v in (existing_comments or {}).items()
+        }
         self.labels: dict[str, list[str]] = {}
         self.archived: list[str] = []
         # 実物の API と同じく、失敗するのは特定のカードだけ
@@ -70,8 +75,9 @@ class FakeTriageRepo(TriageCardRepository):
     def add_comment(self, card_id: CardId, text: str) -> None:
         self.comments.setdefault(str(card_id), []).append(text)
 
-    def has_comment(self, card_id: CardId, digest: str) -> bool:
-        return any(digest in text for text in self.comments.get(str(card_id), []))
+    def has_comment(self, card_id: CardId, key: str) -> bool:
+        # 実物の Trello 実装と同じく、コメント本文に冪等キーが含まれるかで照合する
+        return any(key in text for text in self.comments.get(str(card_id), []))
 
     def add_label(self, card_id: CardId, label: str) -> None:
         self.labels.setdefault(str(card_id), []).append(label)
@@ -242,16 +248,78 @@ class TestApply:
         posted = [text for texts in repo.comments.values() for text in texts]
         assert posted and all(text.startswith("🤖 triage:") for text in posted)
 
-    def test_merge_comment_is_not_posted_twice(self):
-        """代表カードに同じ digest のコメントが既にあるとき、再投稿しないこと（冪等）。"""
-        duplicate = card("b")
-        repo = FakeTriageRepo(
-            [card("a"), duplicate],
-            existing_comments={"trello:a": f"🤖 triage: 済み digest={duplicate.digest()}"},
-        )
-        _, repo, _, _, _ = run([], repo=repo, apply=True)
-        assert len(repo.comments["trello:a"]) == 1
-        assert repo.archived == ["trello:b"]
+    def test_each_folded_card_leaves_its_own_comment_on_the_representative(self):
+        """digest が等しい重複が複数枚あるとき、代表には畳んだカードごとに集約コメントが残ること。
+
+        digest はタイトルと本文だけの関数なので、内容が同じ重複カード同士では必ず等しくなる。
+        冪等キーが digest だけだと 2 枚目の集約コメントが「既に投稿済み」として抑止され、
+        どのカードを畳んだかが代表に残らない（アーカイブは可逆でも記録が消えるので人間が
+        追えない）。merge_comment_key からカード ID を落とすと、代表のコメントが 1 件に
+        なってこのテストが落ちる。
+        """
+        cards = [card("a"), card("b"), card("c")]
+        # 前提を明示する。3 枚の digest が等しいことが衝突の前提なので、digest() の定義が
+        # 変わってここが崩れると、このテストは衝突しない状況を確かめるだけになる
+        assert cards[0].digest() == cards[1].digest() == cards[2].digest()
+        _, repo, _, _, _ = run(cards, apply=True)
+        assert repo.archived == ["trello:b", "trello:c"]
+        posted = repo.comments["trello:a"]
+        assert len(posted) == 2
+        assert [t for t in posted if "https://trello.com/c/b\n" in t]
+        assert [t for t in posted if "https://trello.com/c/c\n" in t]
+
+    def test_card_id_that_is_a_prefix_of_another_does_not_suppress_the_comment(self):
+        """あるカード ID が別のカード ID の接頭辞であるとき、集約コメントを取り違えないこと。
+
+        冪等キーの照合はコメント本文の部分一致なので、鍵をそのまま渡すと trello:b の鍵が
+        trello:b2 のコメントに含まれ、b の集約コメントが抑止される（本チケットと同じ
+        「無言でアーカイブ」の再発）。照合から前後の区切り（`key=` と改行）を外すと落ちる。
+        """
+        cards = [card("a"), card("b2"), card("b")]
+        _, repo, _, _, _ = run(cards, apply=True)
+        assert sorted(repo.archived) == ["trello:b", "trello:b2"]
+        posted = repo.comments["trello:a"]
+        assert len(posted) == 2
+        assert [t for t in posted if "https://trello.com/c/b\n" in t]
+        assert [t for t in posted if "https://trello.com/c/b2\n" in t]
+
+    def test_merge_comment_is_not_posted_twice_for_the_same_card(self):
+        """同じ内容の重複カードを次のランでもう一度畳むとき、代表への集約コメントを重ねないこと。
+
+        1 ラン目はアーカイブに失敗させて台帳に計画だけを残し、2 ラン目で再開させる。
+        2 ラン目のリポジトリには 1 ラン目のコメント履歴を丸ごと引き継ぐ。has_comment の
+        照合をやめると代表のコメントが 2 件になって落ちる。
+
+        畳まれる側のカード自身に残る理由コメントは照合対象外（追加 API 呼び出しを代表宛の
+        1 回に抑える割り切り。仕様書の冪等性の節に明記）なので、代表の記録だけを検証する。
+        """
+        ledger = FakeLedger()
+        cards = [card("a"), card("b")]
+        first = FakeTriageRepo(cards, archive_errors=("trello:b",))
+        run([], repo=first, ledger=ledger, apply=True)
+        aggregated = first.comments["trello:a"]
+        assert len(aggregated) == 1  # 代表へのコメントはアーカイブ失敗の前に済んでいる
+        second = FakeTriageRepo(cards, existing_comments=first.comments)
+        _, second, _, _, _ = run([], repo=second, ledger=ledger, apply=True)
+        assert second.archived == ["trello:b"]
+        assert second.comments["trello:a"] == aggregated
+
+    def test_changed_card_folded_again_leaves_a_new_comment(self):
+        """畳まれる側の内容が変わって畳み直されたとき、代表に新しい集約コメントが残ること。
+
+        冪等キーは `<digest>/<カード ID>` なので、内容が変われば digest も変わり別の記録に
+        なる（仕様書の冪等性の節。「同じ冪等キーのコメントが既にあれば投稿しない」の対偶）。
+        鍵から digest を落としてカード ID だけにすると、更新後の記録が抑止されて落ちる。
+        """
+        ledger = FakeLedger()
+        first = FakeTriageRepo([card("a"), card("b")], archive_errors=("trello:b",))
+        run([], repo=first, ledger=ledger, apply=True)
+        edited = card("b", body="本文\n追記: 再現手順を書き足した")
+        assert edited.digest() != card("b").digest()  # 前提: 内容が変われば digest も変わる
+        second = FakeTriageRepo([card("a"), edited], existing_comments=first.comments)
+        _, second, _, _, _ = run([], repo=second, ledger=ledger, apply=True)
+        assert second.archived == ["trello:b"]
+        assert len(second.comments["trello:a"]) == 2
 
     def test_failure_of_one_card_does_not_stop_the_run(self):
         """1 枚の適用に失敗しても、後続のカードの適用は続けること。

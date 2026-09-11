@@ -84,13 +84,13 @@ class TrelloTriageRepository(TriageCardRepository):
             f"/cards/{card_id.external_id}/actions/comments", {"text": text}, "コメントの追加"
         )
 
-    def has_comment(self, card_id: CardId, digest: str) -> bool:
+    def has_comment(self, card_id: CardId, key: str) -> bool:
         actions = self._get(
             f"/cards/{card_id.external_id}/actions",
             {"filter": "commentCard", "limit": COMMENT_WINDOW},
             "コメントの取得",
         )
-        return any(digest in a.get("data", {}).get("text", "") for a in actions)
+        return any(key in a.get("data", {}).get("text", "") for a in actions)
 
     def add_label(self, card_id: CardId, label: str) -> None:
         label_id = self._label_id(label)
