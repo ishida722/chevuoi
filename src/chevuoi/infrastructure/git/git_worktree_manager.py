@@ -42,13 +42,61 @@ class GitWorktreeManager(WorktreeManager):
         )
         args = ["worktree", "add"]
         if not branch_exists:
-            args += ["-b", branch.value, str(path)]
+            # 新規ブランチは常にリモートの既定ブランチの最新から分岐する。本体側が
+            # 古い状態でも別ブランチをチェックアウト中でも、作業の起点は揃える。
+            base = self._fetch_default_branch(project.repo_path)
+            if base is None:
+                args += ["-b", branch.value, str(path)]
+            else:
+                # --no-track: upstream を設定しない。設定すると共有の .git/config を
+                # 書くため並列作成が衝突し、worktree 内の素の git push / pull が
+                # ベースブランチに向いてしまう。
+                args += ["--no-track", "-b", branch.value, str(path), base]
         else:
             args += [str(path), branch.value]
         result = self._git(project.repo_path, *args, check=False)
         if result.returncode != 0:
             raise WorktreeError(result.stderr.strip())
         return worktree
+
+    def _fetch_default_branch(self, repo_path: Path) -> str | None:
+        """リモートの既定ブランチを取得し直し、分岐元にする ref を返す。
+
+        origin を持たないリポジトリでは None を返し、リポジトリの HEAD から分岐させる。
+        取得や解決に失敗した場合は、古いベースで黙って作らずエラーにする。
+        """
+        if self._git(repo_path, "remote", "get-url", "origin", check=False).returncode != 0:
+            logger.warning("origin が無いため HEAD から worktree を作ります: %s", repo_path)
+            return None
+        branch = self._remote_default_branch(repo_path)
+        # 既定の refspec が既定ブランチを含まないクローン（--single-branch など）でも
+        # 確実に更新するため、refspec を明示する
+        refspec = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+        fetched = self._git(repo_path, "fetch", "--quiet", "origin", refspec, check=False)
+        if fetched.returncode != 0:
+            raise WorktreeError(f"origin の取得に失敗しました: {fetched.stderr.strip()}")
+        return f"origin/{branch}"
+
+    def _remote_default_branch(self, repo_path: Path) -> str:
+        """リモートに問い合わせた既定ブランチ名。
+
+        ローカルの origin/HEAD は使わない。既定ブランチの改名にも削除にも追従せず、
+        古い既定ブランチから分岐し続ける事故になるため、毎回リモートに聞く。
+        """
+        result = self._git(
+            repo_path, "ls-remote", "--symref", "origin", "HEAD", check=False
+        )
+        if result.returncode != 0:
+            raise WorktreeError(
+                f"origin の既定ブランチを解決できませんでした: {result.stderr.strip()}"
+            )
+        for line in result.stdout.splitlines():
+            # 例: "ref: refs/heads/main\tHEAD"
+            if line.startswith("ref:"):
+                return line.split()[1].removeprefix("refs/heads/")
+        raise WorktreeError(
+            "origin の既定ブランチを解決できませんでした（リモートに既定ブランチがありません）"
+        )
 
     def list_stale(self, older_than_days: int) -> list[Worktree]:
         """作成から指定日数を経過した chevuoi 管理下の worktree を列挙する。
