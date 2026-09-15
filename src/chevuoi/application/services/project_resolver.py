@@ -26,7 +26,12 @@ class ProjectResolver:
         entry = self._lookup(tag.value)
         if entry is None:
             return NullProject(tag=tag)
-        return Project(tag=tag, repo_path=entry.path, test_commands=list(entry.test_commands))
+        return Project(
+            tag=tag,
+            repo_path=entry.path,
+            test_commands=list(entry.test_commands),
+            base_ref=entry.base_ref,
+        )
 
     def _lookup(self, value: str) -> ProjectConfig | None:
         entry = self._config.projects.get(value)
