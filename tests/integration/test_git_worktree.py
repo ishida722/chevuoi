@@ -53,6 +53,27 @@ def repo_with_origin(tmp_path: Path, repo: Path) -> Path:
     return repo
 
 
+def _head_sha(cwd: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(cwd), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _advance_origin(tmp_path: Path, name: str) -> str:
+    """別クローン経由で origin の既定ブランチを 1 コミット進め、その SHA を返す。
+
+    本体リポジトリを経由しないので、`repo` 側はこのコミットを知らない状態になる。
+    """
+    origin = tmp_path / "origin.git"
+    clone = tmp_path / f"clone-{name}"
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+    (clone / f"{name}.txt").write_text(name)
+    _commit(clone, name)
+    subprocess.run(["git", "-C", str(clone), "push", "-q", "origin", "HEAD"], check=True)
+    return _head_sha(clone)
+
+
 class TestGitWorktreeManager:
     def test_create_makes_worktree_with_derived_branch(self, tmp_path, repo):
         manager = make_manager(tmp_path)
@@ -172,3 +193,170 @@ class TestGitWorktreeManager:
         )
         with pytest.raises(WorktreeError):
             manager.has_changes(worktree)
+
+    def test_create_branches_from_latest_remote_default_branch(self, tmp_path, repo_with_origin):
+        """本体側が知らない最新コミットがリモートの既定ブランチにあるとき、
+        worktree はローカルの状態ではなくその最新コミットから分岐すること。"""
+        manager = make_manager(tmp_path)
+        # 本体側は別ブランチの未 push コミットを抱えたまま、既定ブランチも古い
+        subprocess.run(["git", "-C", str(repo_with_origin), "checkout", "-q", "-b", "other"],
+                       check=True)
+        (repo_with_origin / "other.txt").write_text("other")
+        _commit(repo_with_origin, "other work")
+        remote_tip = _advance_origin(tmp_path, "remote-work")
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+
+        worktree = manager.create(project, FakeCard("X test"))
+
+        assert _head_sha(worktree.path) == remote_tip
+        assert not (worktree.path / "other.txt").exists()
+
+    def test_create_follows_renamed_remote_default_branch(self, tmp_path, repo_with_origin):
+        """リモートの既定ブランチが改名されたとき、ローカルに残る古い origin/HEAD ではなく
+        新しい既定ブランチの最新から分岐すること。"""
+        manager = make_manager(tmp_path)
+        origin = tmp_path / "origin.git"
+        clone = tmp_path / "clone-rename"
+        subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+        subprocess.run(["git", "-C", str(clone), "checkout", "-q", "-b", "renamed"], check=True)
+        (clone / "renamed.txt").write_text("renamed")
+        _commit(clone, "renamed work")
+        subprocess.run(["git", "-C", str(clone), "push", "-q", "origin", "renamed"], check=True)
+        subprocess.run(
+            ["git", "-C", str(origin), "symbolic-ref", "HEAD", "refs/heads/renamed"], check=True
+        )
+        # ローカルの origin/HEAD は改名前を指したまま（実体は残っているので解決はできる）
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+
+        worktree = manager.create(project, FakeCard("X test"))
+
+        assert _head_sha(worktree.path) == _head_sha(clone)
+
+    @pytest.mark.parametrize("break_origin_head", ["delete", "dangling"])
+    def test_create_ignores_unusable_local_origin_head(
+        self, tmp_path, repo_with_origin, break_origin_head
+    ):
+        """ローカルの origin/HEAD が無い・壊れている場合でも、
+        リモートの既定ブランチの最新から分岐すること。"""
+        manager = make_manager(tmp_path)
+        if break_origin_head == "delete":
+            args = ["symbolic-ref", "-d", "refs/remotes/origin/HEAD"]
+        else:
+            args = ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone"]
+        subprocess.run(["git", "-C", str(repo_with_origin), *args], check=True)
+        remote_tip = _advance_origin(tmp_path, "remote-work")
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+
+        worktree = manager.create(project, FakeCard("X test"))
+
+        assert _head_sha(worktree.path) == remote_tip
+
+    def test_create_fetches_default_branch_in_narrow_refspec_clone(
+        self, tmp_path, repo_with_origin
+    ):
+        """既定の refspec が既定ブランチを含まないクローンでも、
+        既定ブランチを取得して最新から分岐すること。"""
+        manager = make_manager(tmp_path)
+        default_branch = subprocess.run(
+            ["git", "-C", str(repo_with_origin), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(repo_with_origin), "checkout", "-q", "-b", "side"],
+                       check=True)
+        subprocess.run(["git", "-C", str(repo_with_origin), "push", "-q", "origin", "side"],
+                       check=True)
+        narrow = tmp_path / "narrow"
+        subprocess.run(
+            ["git", "clone", "-q", "--single-branch", "--branch", "side",
+             str(tmp_path / "origin.git"), str(narrow)],
+            check=True,
+        )
+        assert default_branch not in subprocess.run(
+            ["git", "-C", str(narrow), "config", "remote.origin.fetch"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        remote_tip = _advance_origin(tmp_path, "remote-work")
+        project = Project(tag=ProjectTag(value="X"), repo_path=narrow)
+
+        worktree = manager.create(project, FakeCard("X test"))
+
+        assert _head_sha(worktree.path) == remote_tip
+
+    def test_create_does_not_set_upstream_on_new_branch(self, tmp_path, repo_with_origin):
+        """新規ブランチには upstream を設定しないこと（worktree 内の素の git push / pull を
+        ベースブランチに向けず、共有の .git/config も書かないため）。"""
+        manager = make_manager(tmp_path)
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+
+        worktree = manager.create(project, FakeCard("X test"))
+
+        upstream = subprocess.run(
+            ["git", "-C", str(worktree.path), "rev-parse", "--abbrev-ref",
+             "--symbolic-full-name", "@{upstream}"],
+            capture_output=True, text=True,
+        )
+        assert upstream.returncode != 0, f"upstream が設定されている: {upstream.stdout.strip()}"
+
+    @pytest.mark.parametrize("breakage", ["unreachable", "no_branches"])
+    def test_create_fails_when_default_branch_cannot_be_resolved(
+        self, tmp_path, repo_with_origin, breakage
+    ):
+        """リモートの既定ブランチを解決できないときは、古いローカルのベースで作らず
+        「解決できない」と分かるエラーにすること。"""
+        manager = make_manager(tmp_path)
+        if breakage == "unreachable":
+            url = tmp_path / "missing.git"
+        else:
+            url = tmp_path / "empty.git"
+            subprocess.run(["git", "init", "--bare", "-q", str(url)], check=True)
+        subprocess.run(
+            ["git", "-C", str(repo_with_origin), "remote", "set-url", "origin", str(url)],
+            check=True,
+        )
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+
+        with pytest.raises(WorktreeError, match="既定ブランチを解決できませんでした"):
+            manager.create(project, FakeCard("X test"))
+        assert not (tmp_path / "worktrees" / "chevuoi-fake-x1").exists()
+
+    def test_create_fails_when_remote_cannot_be_fetched(self, tmp_path, repo_with_origin):
+        """既定ブランチは解決できても取得に失敗したときは、古いローカルのベースで作らず
+        「取得に失敗」と分かるエラーにすること。"""
+        manager = make_manager(tmp_path)
+        default_branch = subprocess.run(
+            ["git", "-C", str(repo_with_origin), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        # リモートの ref を実体の無いコミットに向ける（ls-remote は成功し fetch が失敗する）
+        ref = tmp_path / "origin.git" / "refs" / "heads" / default_branch
+        ref.parent.mkdir(parents=True, exist_ok=True)
+        ref.write_text("0" * 39 + "1\n")
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+
+        with pytest.raises(WorktreeError, match="origin の取得に失敗しました"):
+            manager.create(project, FakeCard("X test"))
+        assert not (tmp_path / "worktrees" / "chevuoi-fake-x1").exists()
+
+    def test_create_without_origin_uses_repository_head(self, tmp_path, repo):
+        """origin を持たないリポジトリでは、リポジトリの HEAD から作れること。"""
+        manager = make_manager(tmp_path)
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo)
+
+        worktree = manager.create(project, FakeCard("X test"))
+
+        assert _head_sha(worktree.path) == _head_sha(repo)
+
+    def test_recreate_after_remove_keeps_work_on_existing_branch(self, tmp_path, repo_with_origin):
+        """同名ブランチが既にある場合は、最新 main で作り直さずそのブランチの成果を残すこと。"""
+        manager = make_manager(tmp_path)
+        project = Project(tag=ProjectTag(value="X"), repo_path=repo_with_origin)
+        card = FakeCard("X test")
+        first = manager.create(project, card)
+        (first.path / "a.txt").write_text("a")
+        _commit(first.path, "work")
+        manager.remove(first)
+        _advance_origin(tmp_path, "remote-work")
+
+        second = manager.create(project, card)
+
+        assert (second.path / "a.txt").read_text() == "a"
