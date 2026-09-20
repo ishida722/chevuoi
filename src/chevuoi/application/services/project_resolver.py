@@ -3,6 +3,7 @@ from __future__ import annotations
 from injector import inject
 
 from chevuoi.domain.entities.project import NullProject, Project
+from chevuoi.domain.services.project_tag_matching import match_tag
 from chevuoi.domain.value_objects.project_tag import ProjectTag
 from chevuoi.infrastructure.config.settings import AppConfig, ProjectConfig
 
@@ -34,12 +35,7 @@ class ProjectResolver:
         )
 
     def _lookup(self, value: str) -> ProjectConfig | None:
-        entry = self._config.projects.get(value)
-        if entry is not None:
-            return entry
-        # タグの大文字小文字は無視する（例: "Wf" と "wf" を同一視）
-        wanted = value.casefold()
-        return next(
-            (cfg for key, cfg in self._config.projects.items() if key.casefold() == wanted),
-            None,
-        )
+        # タグの大文字小文字と、括弧などの記号は無視する
+        # （例: "Wf" と "wf"、"[テレ東]" と "テレ東" を同一視）
+        key = match_tag(value, self._config.projects)
+        return self._config.projects[key] if key is not None else None

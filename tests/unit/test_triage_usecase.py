@@ -574,6 +574,23 @@ class TestFilters:
         assert [str(p.repo_path) for p in inspector.refreshed] == ["/repo/mirai"]
         assert [c[0] for c in judge.resolved_calls] == ["trello:a"]
 
+    def test_project_option_ignores_symbols_in_the_tag(self):
+        """--project の指定とカードのタグで記号の書き方が違っても（"MIRAI" と "[MIRAI]"）、
+        同じプロジェクトのカードとして読むこと。"""
+        cards = [card("a", "[MIRAI] 落ちる"), card("b", "SSC 落ちる")]
+        report, _, _, _, _ = run(cards, project="MIRAI")
+        assert [p.card_id.external_id for p in report.planned] == ["a"]
+
+    def test_project_tag_lookup_ignores_symbols(self):
+        """カードのタグが括弧つきでも（"[MIRAI]"）、設定のキー "MIRAI" のプロジェクトを
+        基準に鮮度を判定すること。"""
+        cards = [card("a", "[MIRAI] 落ちる", evidence=("src/foo.py:1",))]
+        _, _, judge, _, inspector = run(
+            cards, inspector=FakeInspector(missing_paths=("src/foo.py",))
+        )
+        assert [str(p.repo_path) for p in inspector.refreshed] == ["/repo/mirai"]
+        assert [c[0] for c in judge.resolved_calls] == ["trello:a"]
+
     def test_limit_option_caps_the_cards(self):
         """--limit を指定したとき、読むカード数がその件数で打ち切られること。"""
         report, _, _, _, _ = run([card("a"), card("b"), card("c")], limit=2)

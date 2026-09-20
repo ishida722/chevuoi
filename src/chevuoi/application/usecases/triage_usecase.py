@@ -15,6 +15,7 @@ from chevuoi.domain.ports.similarity_strategy import SimilarityStrategy
 from chevuoi.domain.ports.triage_card_repository import TriageCardRepository
 from chevuoi.domain.ports.triage_judge import TriageJudge
 from chevuoi.domain.ports.triage_ledger import TriageLedger, TriageLedgerEntry
+from chevuoi.domain.services.project_tag_matching import match_tag, tag_key
 from chevuoi.domain.services.triage_clustering import build_clusters, find_duplicate_pairs
 from chevuoi.domain.services.triage_policy import DeterministicSignals, decide
 from chevuoi.domain.value_objects.card_id import CardId
@@ -74,8 +75,8 @@ class TriageUsecase:
 
         cards = self._cards.fetch_open()
         if project is not None:
-            wanted = project.casefold()
-            cards = [c for c in cards if _tag_value(c).casefold() == wanted]
+            wanted = tag_key(project)
+            cards = [c for c in cards if tag_key(_tag_value(c)) == wanted]
         if limit is not None:
             cards = cards[:limit]
 
@@ -139,7 +140,7 @@ class TriageUsecase:
         resolved_context = self._resolvable_projects(targets)
         resolution: dict[str, DeterministicSignals] = {}
         for key, card in targets.items():
-            context = resolved_context.get(_tag_value(card).casefold())
+            context = resolved_context.get(tag_key(_tag_value(card)))
             if context is not None and card.evidence:
                 # git の読み取りは 1 枚につき 1 回だけ行い、判定にも決定表にも同じ事実を使う
                 resolution[key] = self._resolution_signals(card, context[0])
@@ -147,7 +148,7 @@ class TriageUsecase:
         for key, card in targets.items():
             if key in representatives and str(representatives[key].id) != key:
                 continue  # 重複として畳む予定のカードに鮮度判定は要らない
-            context = resolved_context.get(_tag_value(card).casefold())
+            context = resolved_context.get(tag_key(_tag_value(card)))
             if context is None:
                 continue
             checkout = context[1]
@@ -241,7 +242,12 @@ class TriageUsecase:
         """
         context: dict[str, tuple[Project, Path]] = {}
         tags = {_tag_value(c) for c in targets.values() if _tag_value(c)}
+        # 記号違いで書かれた同じタグ（"[テレ東]" と "テレ東"）は 1 つにまとめる。
+        # 分けて持つと、同じリポジトリを 2 回 fetch / checkout することになる
+        by_key: dict[str, str] = {}
         for tag in sorted(tags):
+            by_key.setdefault(tag_key(tag), tag)
+        for key, tag in sorted(by_key.items()):
             project = self._resolve_project(tag)
             if project is None:
                 logger.info("タグ %s に対応するプロジェクトが無いため鮮度判定を見送り", tag)
@@ -254,18 +260,16 @@ class TriageUsecase:
             except Exception as e:  # noqa: BLE001 - 判定を諦めるだけでランは続ける
                 logger.warning("ベースのチェックアウトに失敗（%s）: %s", tag, e)
                 continue
-            context[tag.casefold()] = (project, checkout)
+            context[key] = (project, checkout)
         return context
 
     def _resolve_project(self, tag: str) -> Project | None:
-        """タグ → Project の写像。タグの照合は大文字小文字を無視する
-        （ProcessCardUsecase.resolve_project と同じ規則）。"""
-        wanted = tag.casefold()
-        entry = next(
-            (cfg for key, cfg in self._config.projects.items() if key.casefold() == wanted), None
-        )
-        if entry is None:
+        """タグ → Project の写像。タグの照合は大文字小文字と、括弧などの記号を無視する
+        （ProjectResolver と同じ規則）。"""
+        key = match_tag(tag, self._config.projects)
+        if key is None:
             return None
+        entry = self._config.projects[key]
         return Project(
             tag=ProjectTag(value=tag),
             repo_path=entry.path,
