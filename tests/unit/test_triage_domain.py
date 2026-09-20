@@ -232,6 +232,26 @@ class TestClustering:
         )
         assert pairs == []
 
+    def test_symbol_variants_of_a_tag_are_the_same_project(self):
+        """同じプロジェクトのタグを記号違いで書いたカード同士（"[MIRAI]" と "MIRAI"）は、
+        同じプロジェクトとして比較されること。"""
+        pairs = find_duplicate_pairs(
+            [card("a", "[MIRAI] 同じ話"), card("b", "MIRAI 同じ話")],
+            TrigramSimilarity(),
+            threshold=0.1,
+        )
+        assert len(pairs) == 1
+
+    def test_different_symbol_only_tags_are_not_the_same_project(self):
+        """タグが記号だけで互いに違うとき（"[]" と "{}"）、同じプロジェクトとして
+        比較しないこと（記号を落として空文字に潰すと混ざる）。"""
+        pairs = find_duplicate_pairs(
+            [card("a", "[] 同じ話"), card("b", "{} 同じ話")],
+            TrigramSimilarity(),
+            threshold=0.1,
+        )
+        assert pairs == []
+
     def test_exact_title_pair_is_kept_even_below_threshold(self):
         """正規化タイトルが完全一致するペアは、閾値を上げても候補に残ること。"""
         pairs = find_duplicate_pairs(

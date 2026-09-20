@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from chevuoi.domain.entities.triage_card import TriageCard
 from chevuoi.domain.ports.similarity_strategy import SimilarityStrategy
+from chevuoi.domain.services.project_tag_matching import tag_key
 from chevuoi.domain.services.similarity import normalize_for_similarity
 from chevuoi.domain.value_objects.card_id import CardId
 
@@ -22,8 +23,10 @@ class DuplicatePair(BaseModel):
 
 
 def _group_key(card: TriageCard) -> str:
+    """比較するグループ（プロジェクト）のキー。記号違いで書かれた同じタグ
+    （"[テレ東]" と "テレ東"）は同じプロジェクトとして扱う。"""
     tag = card.project_tag
-    return tag.value.casefold() if tag is not None else ""
+    return tag_key(tag.value) if tag is not None else ""
 
 
 def find_duplicate_pairs(
