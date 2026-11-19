@@ -20,12 +20,14 @@ from chevuoi.domain.ports.similarity_strategy import SimilarityStrategy
 from chevuoi.domain.ports.triage_card_repository import TriageCardRepository
 from chevuoi.domain.ports.triage_judge import TriageJudge
 from chevuoi.domain.ports.triage_ledger import TriageLedger
+from chevuoi.domain.ports.workspace_inspector import WorkspaceInspector
 from chevuoi.domain.ports.worktree_manager import WorktreeManager
 from chevuoi.infrastructure.config.settings import AppConfig
 from chevuoi.infrastructure.git.gh_pull_request_publisher import GhPullRequestPublisher
 from chevuoi.infrastructure.git.gh_review_request_provider import GhReviewRequestProvider
 from chevuoi.infrastructure.git.git_repository_locator import GitRepositoryLocator
 from chevuoi.infrastructure.git.git_repository_inspector import GitRepositoryInspector
+from chevuoi.infrastructure.git.git_workspace_inspector import GitWorkspaceInspector
 from chevuoi.infrastructure.git.git_worktree_manager import GitWorktreeManager
 from chevuoi.infrastructure.state.json_triage_ledger import JsonTriageLedger
 from chevuoi.infrastructure.strategies.similarity_factory import get_similarity_class
@@ -53,6 +55,8 @@ class AppModule(Module):
         binder.bind(CardIssuer, to=TrelloCardIssuer, scope=singleton)  # type: ignore[type-abstract]
         # IssueCardUsecase / IssueProposalsUsecase は @inject の自動解決に任せる（bind 不要）
         binder.bind(WorktreeManager, to=GitWorktreeManager, scope=singleton)  # type: ignore[type-abstract]
+        # vuoi exec が今いる作業ツリーを読む（状態を持たない）
+        binder.bind(WorkspaceInspector, to=GitWorkspaceInspector, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(PullRequestPublisher, to=GhPullRequestPublisher, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(ReviewRequestProvider, to=GhReviewRequestProvider, scope=singleton)  # type: ignore[type-abstract]
         # GitRepositoryLocator はリポジトリ名をキャッシュするため singleton

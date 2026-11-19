@@ -84,6 +84,7 @@ vuoi triage --apply           # 整理の計画を適用する（既定は dry-r
 vuoi workflow list            # ユーザー定義ワークフローの一覧
 vuoi workflow run <name> ["メッセージ"]   # ワークフローを名指しで1回実行
 vuoi workflow select <title> ["本文"]    # カード内容からワークフローを選ぶ
+vuoi exec <name> --brief brief.md --json result.json   # 今いる作業ツリーでワークフローを1回実行（対話からの呼び出し用）
 ```
 
 各コマンドの挙動と常駐方法（systemd timer + oneshot service）は `docs/spec/cli.md` を参照してください。

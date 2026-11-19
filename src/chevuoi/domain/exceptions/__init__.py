@@ -40,3 +40,7 @@ class AmbiguousSelection(WorkflowError):
 
 class TriageError(ChevuoiError):
     """トリアージ対象カードの取得・更新に失敗した（Inbox 未設定・API エラーなど）。"""
+
+
+class WorkspaceError(ChevuoiError):
+    """作業ツリー（vuoi exec の実行場所）を git リポジトリとして扱えない。"""
