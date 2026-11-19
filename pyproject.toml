@@ -33,3 +33,8 @@ dev = [
     "pytest>=9.1.1",
     "sphinx>=9.1.0",
 ]
+
+[tool.pytest.ini_options]
+# issues/ 配下には再現用のテストが置かれるが、これは調査時に tests/unit へ複写して
+# 走らせるためのもので、通常の実行では収集しない（そのままでは import が解決しない）
+testpaths = ["tests"]
