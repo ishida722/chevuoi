@@ -75,6 +75,20 @@ def recording_graph(seen: dict, *, blocked: str = "", touch: FakeInspector | Non
     return LoadedWorkflow(name="rec", graph=g.compile(name="rec"))
 
 
+def simple_graph(fn):
+    """1 ノードだけのグラフ。fn(state) の戻り値をそのまま state の更新にする。"""
+    g = StateGraph(State)
+    g.add_node("work", fn)
+    g.add_edge(START, "work")
+    g.add_edge("work", END)
+    return LoadedWorkflow(name="rec", graph=g.compile(name="rec"))
+
+
+class FailingChangedFilesInspector(FakeInspector):
+    def changed_files(self, root: Path) -> list[str]:
+        raise WorkspaceError("git status がタイムアウトしました")
+
+
 def make_usecase(graph, inspector: FakeInspector, projects=None) -> ExecUsecase:
     registry = WorkflowRegistry(FakeScanner({"rec": make_meta("rec")}), FakeLoader(graph))
     config = make_config(projects=projects or {})
@@ -182,6 +196,36 @@ class TestExecUsecase:
         assert seen == {}
 
 
+class TestExecFailures:
+    def test_failure_during_run_keeps_workdir_and_changed_files(self):
+        """実行中に例外が出ても、作業ツリーと途中までの変更ファイルを結果に残すこと。"""
+        inspector = FakeInspector()
+
+        def boom(state):
+            inspector.changed.append(" M src/app.py")
+            raise RuntimeError("途中で失敗")
+
+        projects = {"app": ProjectConfig(path=ROOT, test_commands=["pytest -q"])}
+        outcome = make_usecase(simple_graph(boom), inspector, projects).execute(
+            "rec", "x", cwd=ROOT
+        )
+        assert outcome.status == "error"
+        assert "途中で失敗" in outcome.error
+        assert outcome.workdir == str(ROOT)
+        assert outcome.project == "app"
+        assert outcome.changed_files == [" M src/app.py"]
+
+    def test_changed_files_failure_after_run_keeps_result(self):
+        """実行後に変更ファイルを取得できなくても、実行結果は捨てないこと。"""
+        outcome = make_usecase(
+            simple_graph(lambda s: {"result": "要約", "blocked": ""}),
+            FailingChangedFilesInspector(),
+        ).execute("rec", "x", cwd=ROOT)
+        assert outcome.status == "done"
+        assert outcome.summary == "要約"
+        assert outcome.changed_files == []
+
+
 class FakeExecUsecase:
     def __init__(self, outcome: ExecOutcome | None = None, error: Exception | None = None):
         self.calls: list[dict] = []
@@ -253,6 +297,17 @@ class TestExecCommand:
         out = tmp_path / "result.json"
         assert run_cli(["exec", "dev", "--brief", str(brief), "--json", str(out)], usecase) == 1
         assert "boom" in json.loads(out.read_text(encoding="utf-8"))["error"]
+
+    def test_blank_brief_is_error_without_running(self, tmp_path):
+        """空白だけのブリーフでは、ワークフローを起動せずにエラーで終わること。"""
+        blank = tmp_path / "blank.md"
+        blank.write_text("  \n\n", encoding="utf-8")
+        usecase = FakeExecUsecase()
+        out = tmp_path / "result.json"
+        code = run_cli(["exec", "dev", "--brief", str(blank), "--json", str(out)], usecase)
+        assert code == 1
+        assert usecase.calls == []
+        assert "空" in json.loads(out.read_text(encoding="utf-8"))["error"]
 
     def test_missing_brief_file_is_error_without_running(self, tmp_path):
         usecase = FakeExecUsecase()

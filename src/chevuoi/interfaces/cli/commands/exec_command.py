@@ -47,13 +47,17 @@ def exec_workflow(
     except OSError as e:
         _finish(ExecOutcome(status="error", workflow=name, error=f"ブリーフを読めません: {e}"), json_path)
         return
+    if not text.strip():
+        # 空の指示で長時間のワークフローを動かさない
+        _finish(ExecOutcome(status="error", workflow=name, error=f"ブリーフが空です: {brief}"), json_path)
+        return
     try:
         outcome = get_injector(ctx).get(ExecUsecase).execute(
             name, text, cwd=Path.cwd(), test_commands=test_commands or ()
         )
     except ChevuoiError as e:
         outcome = ExecOutcome(status="error", workflow=name, error=str(e))
-    except Exception as e:  # noqa: BLE001 ワークフロー内の想定外の失敗も結果として返す
+    except Exception as e:  # noqa: BLE001 実行前の想定外の失敗も結果として返す
         logger.exception("vuoi exec failed: %s", name)
         outcome = ExecOutcome(status="error", workflow=name, error=f"{type(e).__name__}: {e}")
     _finish(outcome, json_path)
