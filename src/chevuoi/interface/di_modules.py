@@ -16,6 +16,7 @@ from chevuoi.domain.ports.pull_request_publisher import PullRequestPublisher
 from chevuoi.domain.ports.repository_locator import RepositoryLocator
 from chevuoi.domain.ports.repository_inspector import RepositoryInspector
 from chevuoi.domain.ports.review_request_provider import ReviewRequestProvider
+from chevuoi.domain.ports.run_store import RunStore
 from chevuoi.domain.ports.similarity_strategy import SimilarityStrategy
 from chevuoi.domain.ports.triage_card_repository import TriageCardRepository
 from chevuoi.domain.ports.triage_judge import TriageJudge
@@ -29,6 +30,7 @@ from chevuoi.infrastructure.git.git_repository_locator import GitRepositoryLocat
 from chevuoi.infrastructure.git.git_repository_inspector import GitRepositoryInspector
 from chevuoi.infrastructure.git.git_workspace_inspector import GitWorkspaceInspector
 from chevuoi.infrastructure.git.git_worktree_manager import GitWorktreeManager
+from chevuoi.infrastructure.runs.fs_run_store import FsRunStore
 from chevuoi.infrastructure.state.json_triage_ledger import JsonTriageLedger
 from chevuoi.infrastructure.strategies.similarity_factory import get_similarity_class
 from chevuoi.infrastructure.trello.client import TrelloClient
@@ -57,6 +59,9 @@ class AppModule(Module):
         binder.bind(WorktreeManager, to=GitWorktreeManager, scope=singleton)  # type: ignore[type-abstract]
         # vuoi exec が今いる作業ツリーを読む（状態を持たない）
         binder.bind(WorkspaceInspector, to=GitWorkspaceInspector, scope=singleton)  # type: ignore[type-abstract]
+        # MCP の start / status の実行記録。RunLauncher は設定ファイルのパスが要るため
+        # MCP サーバーの起動時に McpModule で bind する
+        binder.bind(RunStore, to=FsRunStore, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(PullRequestPublisher, to=GhPullRequestPublisher, scope=singleton)  # type: ignore[type-abstract]
         binder.bind(ReviewRequestProvider, to=GhReviewRequestProvider, scope=singleton)  # type: ignore[type-abstract]
         # GitRepositoryLocator はリポジトリ名をキャッシュするため singleton

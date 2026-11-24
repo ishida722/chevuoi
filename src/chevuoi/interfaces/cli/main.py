@@ -21,6 +21,7 @@ from chevuoi.interface.di_modules import AppModule
 from chevuoi.interfaces.cli.commands import card, triage, workflow
 from chevuoi.interfaces.cli.commands.exec_command import exec_workflow
 from chevuoi.interfaces.cli.context import get_injector
+from chevuoi.interfaces.mcp.command import CONFIG_PATH_KEY, serve
 
 DEFAULT_CONFIG = Path.home() / ".config" / "vuoi" / "config.toml"
 # 標準エラー・ログファイル共通の書式。行頭に日付時刻を付けて後から追えるようにする
@@ -38,6 +39,9 @@ app.add_typer(card.app, name="card")
 app.command("triage", help="Inbox のカードを集約・畳み込み・ラベル付けする")(triage.triage)
 app.command("exec", help="今いる作業ツリーでワークフローを1回実行する（対話からの呼び出し用）")(
     exec_workflow
+)
+app.command("mcp", help="MCP サーバー（stdio）を起動する。ワークフローを start / status で非同期に実行する")(
+    serve
 )
 
 
@@ -76,6 +80,8 @@ def setup(
     # httpx の INFO ログはリクエスト URL（key/token の認証クエリ）を出すため抑止する
     logging.getLogger("httpx").setLevel(logging.WARNING)
     ctx.obj = functools.partial(build_injector, config)
+    # vuoi mcp が起動する vuoi exec に同じ設定ファイルを渡すため
+    ctx.meta[CONFIG_PATH_KEY] = config
 
 
 @app.command("run", help="Trello をポーリングして1巡")
