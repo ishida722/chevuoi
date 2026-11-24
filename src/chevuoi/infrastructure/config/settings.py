@@ -79,6 +79,8 @@ class AppConfig(BaseModel):
     node_timeout_sec: int = 3600
     max_parallel: int = 4
     log_file: Path = Path.home() / ".local" / "state" / "vuoi" / "vuoi.log"
+    # MCP の start で起動した実行の記録（ブリーフ・結果・ログ）の置き場所
+    runs_dir: Path = Path.home() / ".local" / "state" / "vuoi" / "runs"
     workflows_dir: Path | None = None  # None なら load_config で既定値に解決される
     llm: LlmConfig | None = None  # 未設定でもスキャン・一覧は動く
     workflow_defaults: dict[str, Any] = {}

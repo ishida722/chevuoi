@@ -20,6 +20,7 @@ vuoi card issue <tag> <title>            # Inbox にカードを1枚発行（発
 vuoi card issue <tag> <title> --body "本文" --kind bug
 vuoi exec <name> --brief brief.md                 # 今いる作業ツリーでワークフローを1回実行（対話からの呼び出し用）
 vuoi exec <name> --brief brief.md --json result.json --test-command "uv run pytest -q"
+vuoi mcp                      # MCP サーバー（stdio）。exec を start / status で非同期に実行する
 ```
 
 `workflow run` は最後に追加されたメッセージ本文を標準出力に出します。メッセージを増やさないワークフローの場合は、`messages` を除いた最終 state を表示します。失敗（存在しない・無効・ロード失敗）は標準エラーに理由を出して終了コード 1 で終わります。`workflow select` はルーターのモデル・選択結果・確信度・理由を表示し、棄権した場合は終了コード 2 で終わります。
@@ -60,6 +61,30 @@ vuoi exec <name> --brief brief.md --json result.json --test-command "uv run pyte
 実行後に変更ファイルの一覧を取得できなかった場合は、`changed_files` を空にして警告をログに出し、実行結果（`summary` など）はそのまま返します。
 
 実行には十数分かかることがあるため、対話中の Claude からはバックグラウンドで起動し、終わってから JSON を読む使い方を想定しています。実行中は、同じ作業ツリーを編集しないでください（変更が混ざります）。
+
+## MCP サーバー（vuoi mcp）
+
+`mcp` は `exec` を MCP のツールとして公開するサーバーです（stdio）。Claude Code のサンドボックスの中からは `vuoi exec`（内部で `claude -p` を起動する）を実行できないため、サンドボックスの外で動く MCP サーバーから起動します。
+
+```bash
+claude mcp add vuoi -- vuoi mcp
+claude mcp add vuoi -- vuoi --config /path/to/config.toml mcp   # 設定ファイルを指定する場合
+```
+
+ワークフローの実行は長い（dev は十数分）ため、ツール呼び出しで終了を待たずに、`start` で起動して `status` で状態を確認します。
+
+| ツール | 内容 |
+|---|---|
+| `workflows` | `start` に渡せるワークフローの一覧（名前・概要・使いどころ） |
+| `start` | `workflow`・`brief`（本文）・`workdir`・`test_commands`（省略可）を受け取り、`vuoi exec` をバックグラウンドで起動して `run_id` を返す |
+| `status` | `run_id` の状態を返す。`wait_sec`（上限 300）を指定すると、終了するかその秒数が過ぎるまで待ってから返す |
+| `runs` | 最近のランの一覧（新しい順） |
+| `cancel` | 実行中のランを止める。作業ツリーの途中までの変更は残る |
+
+- **検証。** `start` は、ワークフローの存在・作業ツリー（git リポジトリであること）・ブリーフが空でないことを確かめてから起動します。失敗した場合は何も起動せず、理由をエラーとして返します。同じ作業ツリーで実行中のランがある場合も起動しません（変更が混ざるため）。
+- **実行。** `start` は、MCP サーバーと同じ Python 環境・同じ設定ファイルで `vuoi exec` を別プロセスとして起動します。新しいセッションで起動するので、MCP サーバー（Claude Code のセッション）が終了しても実行は続きます。
+- **記録。** ブリーフ・結果の JSON・ログ・実行記録を `runs_dir`（既定 `~/.local/state/vuoi/runs/<run_id>/`）に置きます。作業ツリーの外なので、ワークフローの変更に混ざりません。MCP サーバーを再起動しても、記録から状態を引けます。
+- **状態。** `status` の `state` は `running` / `done` / `blocked` / `error` / `cancelled` です。`running` の間は `log_tail` にログの末尾を、終了後は `result` に `exec` の JSON（上の表）を入れます。`changed_before` は開始時点の `git status --porcelain` で、`result.changed_files` と比べるとワークフローが変えたファイルを見分けられます。プロセスが結果を残さずに終了した場合は `error` とし、ログの末尾を `log_tail` に入れます。
 
 ## 未登録タグの扱い
 

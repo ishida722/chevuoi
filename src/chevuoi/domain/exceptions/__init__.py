@@ -44,3 +44,19 @@ class TriageError(ChevuoiError):
 
 class WorkspaceError(ChevuoiError):
     """作業ツリー（vuoi exec の実行場所）を git リポジトリとして扱えない。"""
+
+
+class RunError(ChevuoiError):
+    """バックグラウンド実行（MCP の start / status）の操作に失敗した。"""
+
+
+class RunNotFound(RunError):
+    """指定した run_id の実行記録が無い。"""
+
+
+class RunConflict(RunError):
+    """同じ作業ツリーで別の実行が動いている。"""
+
+
+class RunLaunchError(RunError):
+    """vuoi exec のプロセスを起動できなかった。"""

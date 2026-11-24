@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -66,9 +67,11 @@ def exec_workflow(
 def _finish(outcome: ExecOutcome, json_path: Path | None) -> None:
     if json_path is not None:
         try:
-            json_path.write_text(
-                outcome.model_dump_json(indent=2) + "\n", encoding="utf-8"
-            )
+            # 一時ファイルに書いてから置き換える。MCP の status は実行中にこのファイルを
+            # 読むので、書きかけの JSON を見せない
+            tmp = json_path.with_name(json_path.name + ".tmp")
+            tmp.write_text(outcome.model_dump_json(indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp, json_path)
         except OSError as e:
             print(f"結果の JSON を書き出せません: {e}", file=sys.stderr)
             _print(outcome)
